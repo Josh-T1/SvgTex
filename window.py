@@ -9,6 +9,8 @@ from .tools import DrawingController, DrawingHandler, FreeHandDrawingHandler, Li
 from pathlib import Path
 import logging
 logger = logging.getLogger(__name__)
+from collections import deque
+from .keyboard_utils import KeyCodes
 
 UNSAVED_NAME = "No Name **"
 
@@ -76,6 +78,31 @@ class ZoomableScrollArea(QScrollArea):
             return self.gestureEvent(event)
         return super().event(event)
 
+class GraphicsScene(QGraphicsScene):
+    def __init__(self, max = 5):
+        super().__init__()
+        self.cache = deque()
+        self.cache_max = max
+
+    def keyPressEvent(self, event):
+        print(f"Event modifiers: {event.modifiers()}")
+        print(f"Key code: {event.key()}")
+        if event.key() == KeyCodes.Key_Delete.value:
+            selected_items = self.selectedItems()
+            for item in selected_items:
+                self.removeItem(item)
+                self.add_to_cache(item)
+
+        elif (event.key() == KeyCodes.Key_U.value and event.modifiers() == Qt.KeyboardModifier(Qt.KeyboardModifier.ShiftModifier)) and len(self.cache) > 0:
+            item = self.cache.pop()
+            self.addItem(item)
+        else:
+            super().keyPressEvent(event)
+
+    def add_to_cache(self, item):
+        if len(self.cache) > self.cache_max:
+            self.cache.popleft()
+        self.cache.append(item)
 
 class IntBox(QWidget):
     clicked = pyqtSignal(int)
@@ -254,7 +281,8 @@ class MainWindow(QMainWindow):
 
     def _create_widgets(self):
         self.graphics_view = GraphicsView()
-        self._scene = QGraphicsScene()
+#        self._scene = QGraphicsScene()
+        self._scene = GraphicsScene()
         self.tool_bar = VToolBar()
 
         scroll_widget = QWidget()
