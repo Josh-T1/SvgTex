@@ -5,12 +5,14 @@ from PyQt6.QtSvg import QSvgGenerator
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QFileDialog, QGraphicsItem, QGraphicsPathItem, QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                              QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsRectItem)
-from .tools import DrawingController, DrawingHandler, FreeHandDrawingHandler, LineDrawingHandler, NullDrawingHandler, SelectableRectItem
+from .tools import DrawingController, NullDrawingHandler
+from .graphics_items import SelectableRectItem
 from pathlib import Path
 import logging
-logger = logging.getLogger(__name__)
 from collections import deque
 from .keyboard_utils import KeyCodes
+
+logger = logging.getLogger(__name__)
 
 UNSAVED_NAME = "No Name **"
 
@@ -85,6 +87,7 @@ class GraphicsScene(QGraphicsScene):
         self.cache_max = max
 
     def keyPressEvent(self, event):
+        # TODO : delete print statements
         print(f"Event modifiers: {event.modifiers()}")
         print(f"Key code: {event.key()}")
         if event.key() == KeyCodes.Key_Delete.value:
@@ -306,7 +309,6 @@ class MainWindow(QMainWindow):
         self._scene.setSceneRect(QRectF(0, 0, self.scene_default_width, self.scene_default_height)) # TODO
         self.scroll_area.setWidgetResizable(True)
 
-
     def _add_widgets(self):
 #        self.main_layout.addWidget(self.graphics_view)
         self.main_layout.addWidget(self.scroll_area)
@@ -318,13 +320,6 @@ class MainWindow(QMainWindow):
         self.graphics_view.setController(controller)
         self.tool_bar.connectClickedTool(controller.setHandlerFromName)
         self.tool_bar.connectClickedPenWidth(controller.setPenWidth)
-
-#    def setDrawingHandler(self, drawing_handler: DrawingHandler) -> bool:
-#        controller = self.graphics_view.controller()
-#        if controller:
-#            controller.setHandler(drawing_handler)
-#            return True
-#        return False
 
     @property
     def scene(self):
@@ -371,8 +366,6 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
-
-
     def save_as_svg(self):
 #        options = QFileDialog.options
         if self._filepath is None:
@@ -400,7 +393,7 @@ class MainWindow(QMainWindow):
         else:
             signal = None
             handler = None
-        selectable_item = SelectableRectItem(svg_item, signal)
+        selectable_item = SelectableRectItem(svg_item,NullDrawingHandler.__name__ ,signal)
         selectable_item.setScale(0.5) # TODO determine scale based on width relative to window width, height width
         self._scene.addItem(selectable_item)
         # hack to 'refresh' signals.. without this loaded graphic won't be selectable untill selector button is pressed again

@@ -4,6 +4,7 @@ from PyQt6.QtCore import QLineF, QObject, QPoint, QPointF, Qt, pyqtBoundSignal, 
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QGraphicsPathItem, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                            QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsItem)
 
+from .graphics_items import SelectableRectItem
 
 class DrawingHandler(ABC):
     @abstractmethod
@@ -55,7 +56,7 @@ class LineDrawingHandler(DrawingHandler):
             scene = view.scene()
             scene.removeItem(self.current_line)
             self.current_line.setLine(self.start_point.x(), self.start_point.y(), end_point.x(), end_point.y())
-            selectable_line = SelectableRectItem(self.current_line, self.handler_signal)
+            selectable_line = SelectableRectItem(self.current_line, NullDrawingHandler.__name__, self.handler_signal)
             scene.addItem(selectable_line)
 
             self.start_point = None
@@ -88,7 +89,7 @@ class FreeHandDrawingHandler(DrawingHandler):
         scene = view.scene()
         scene.removeItem(self.current_path_item)
 
-        selectable_path_item = SelectableRectItem(self.current_path_item, self.handler_signal)
+        selectable_path_item = SelectableRectItem(self.current_path_item, NullDrawingHandler.__name__, self.handler_signal)
         scene.addItem(selectable_path_item)
         self.drawing_started = False
 
