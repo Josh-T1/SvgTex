@@ -1,49 +1,9 @@
 from abc import ABC, abstractmethod
-import sys
-import math
 from PyQt6.QtGui import QAction, QBrush, QColor, QMouseEvent, QPen, QPainterPath, QPainter
-from PyQt6.QtCore import QObject, QPoint, QPointF, Qt, pyqtBoundSignal, pyqtSignal
+from PyQt6.QtCore import QLineF, QObject, QPoint, QPointF, Qt, pyqtBoundSignal, pyqtSignal, QRect, QRectF
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QGraphicsPathItem, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                            QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsItem)
 
-class SelectableRectItem(QGraphicsItem):
-    def __init__(self, item : QGraphicsItem, select_signal: pyqtBoundSignal | None = None):
-        super().__init__()
-        self.pen = QPen(Qt.GlobalColor.red, 2, Qt.PenStyle.DashLine)
-        self.item = item
-        self.item.setParentItem(self)
-        self.setAcceptHoverEvents(True)
-        self.active = False
-        if select_signal: # allow for setting after class init and
-            select_signal.connect(self._toggle_active)
-
-    def _toggle_active(self, name):
-        if name == f"{NullDrawingHandler.__name__}":
-            self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
-            self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
-            self.active = True
-        else:
-            self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
-            self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
-            self.active = False
-
-    def hoverEnterEvent(self, event):
-        self.setSelected(True)
-
-    def hoverLeaveEvent(self, event):
-        self.setSelected(False)
-
-    def paint(self, painter, option, widget):
-        if self.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsSelectable == 0:
-#        if not self.active:
-            return
-        self.item.paint(painter, option, widget)
-        if self.isSelected():
-            painter.setPen(self.pen)
-            painter.drawRect(self.boundingRect())
-
-    def boundingRect(self):
-        return self.item.boundingRect()
 
 class DrawingHandler(ABC):
     @abstractmethod
@@ -59,10 +19,10 @@ class DrawingHandler(ABC):
     @abstractmethod
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         pass
-
-class Pen(ABC):
-    def __init__(self):
-        pass
+    def inBounds(self, scene, event) -> bool:
+        """ Not currently used. Using inBounds with mousePressEvent creates all sorts of issues, simply suppressing the addition of
+        new points to the graphics item will result in a line connecting the first point prior to leaving th escene with the first point after entering scene """
+        return scene.sceneRect().contains(event.position())
 
 class NullDrawingHandler(DrawingHandler):
     """ No drawing behaviour """
@@ -102,7 +62,7 @@ class LineDrawingHandler(DrawingHandler):
             self.current_line = None
 
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        if self.start_point is not None and self.current_line is not None:
+        if (self.start_point is not None and self.current_line is not None):
             end_point = view.mapToScene(event.position().toPoint())
             self.current_line.setLine(self.start_point.x(), self.start_point.y(), end_point.x(), end_point.y())
 
@@ -144,7 +104,7 @@ class FreeHandDrawingHandler(DrawingHandler):
 
 
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        if not self.drawing_started:
+        if not self.drawing_started or not self.inBounds(view.scene(), event):
             return
 
         end = view.mapToScene(event.position().toPoint())
@@ -195,3 +155,4 @@ class DrawingController(QObject):
 
     def setPenWidth(self, size: int):
         self.tool.setWidth(size)
+
