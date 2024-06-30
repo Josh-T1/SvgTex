@@ -8,25 +8,30 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QGraphicsPathItem, QWidget
 from functools import reduce
 from .transformations import RotationHandler, TransformationHandler, ScaleHandler
 
+def extend_rec(rect: QRectF, margin):
+    return QRectF(rect.x() - margin, rect.y() - margin, rect.width() + 2 * margin, rect.height() + 2* margin)
+
 class SelectableRectItem(QGraphicsItem):
     def __init__(self, item : QGraphicsItem, target_sig_name: str, select_signal: pyqtBoundSignal | None = None):
         super().__init__()
-        self.pen = QPen(Qt.GlobalColor.red, 2, Qt.PenStyle.DashLine)
+        self.pen = QPen(Qt.GlobalColor.darkBlue, 2, Qt.PenStyle.DashLine)
         self.item = item
-        self._item_boundingRect = self.item.boundingRect()
         self.target_sig_name = target_sig_name
         self.item.setParentItem(self)
         self.setAcceptHoverEvents(True)
         self.transformation_handlers: list[TransformationHandler] = self._register_transformation_handlers()
-        self.setTransformOriginPoint(self.itemBoundingRect().center())
+        self.setTransformOriginPoint(self.item.boundingRect().center())
 
         if select_signal: # allow for setting after class init and
             select_signal.connect(self._toggle_active)
 
     def _register_transformation_handlers(self) -> list[TransformationHandler]:
         rotation_handler = RotationHandler(self.rotatingRectIcon, self)
-        stretch_handler = ScaleHandler(self.topRightStretchIcon, self)
-        return [rotation_handler, stretch_handler]
+        stretch_handler_top_right = ScaleHandler(self.topRightStretchIcon, self, self.item.boundingRect, side="top_right")
+        stretch_handler_top_left = ScaleHandler(self.topLeftStretchIcon, self, self.item.boundingRect, side="top_left")
+        stretch_handler_bottom_right = ScaleHandler(self.bottomRightStretchIcon, self, self.item.boundingRect, side="bottom_right")
+        stretch_handler_bottom_left = ScaleHandler(self.bottomLeftStretchIcon, self, self.item.boundingRect, side="bottom_left")
+        return [rotation_handler, stretch_handler_top_left, stretch_handler_top_right, stretch_handler_bottom_right, stretch_handler_bottom_left]
 
     def add_handler(self, handler: TransformationHandler) -> None:
         self.transformation_handlers.append(handler)
@@ -42,30 +47,38 @@ class SelectableRectItem(QGraphicsItem):
 #            self.active = False
 
     def setTransform(self, matrix, combine=False) -> None:
-        self.item.setTransform(matrix, combine=combine)
-        # update rects
-        self._item_boundingRect = self.updateRect(self._item_boundingRect, matrix)
+        if round(matrix.determinant(), 3) != 1:
+            self.item.setTransform(matrix, combine=combine)
+        else:
+            QGraphicsItem.setTransform(self, matrix, combine=combine)
+
+    def shape(self):
+        path = QPainterPath()
+        path.addRect(self.itemBoundingRect())
         for handler in self.transformation_handlers:
-            handler.rect = handler.set_rect_callback()
+            path.addRect(handler.rect)
+        return path
 
-    def updateRect(self, rect, transform: QTransform):
-        corners = [rect.topLeft(),
-                   rect.topRight(),
-                   rect.bottomRight(),
-                   rect.bottomLeft()
-                   ]
-        transformed_corners = [transform.map(corner) for corner in corners]
-        min_x = min(corner.x() for corner in transformed_corners)
-        max_x = max(corner.x() for corner in transformed_corners)
-        min_y = min(corner.y() for corner in transformed_corners)
-        max_y = max(corner.y() for corner in transformed_corners)
-        return QRectF(QPointF(min_x, min_y), QPointF(max_x, max_y))
+    def itemBoundingRect(self):
+        """ This default behaviour kinda suck if bouding rect is almost zero in a directino the bounding rect will be wider however the item will be 'stuck' to the side """
+        path = QPainterPath()
+        bounding_rect = self.item.boundingRect()
+        min_width, min_height = 20, 20
+        width = max(min_width, bounding_rect.width())
+        height = max(min_height, bounding_rect.height())
+        x_offset = 10 if width == min_width else 0
+        y_offset = 10 if height == min_height else 0
 
+        rect = QRectF(bounding_rect.x() - x_offset, bounding_rect.y() - y_offset, width,height)
+        path.addRect(rect)
+        return self.item.transform().map(path).boundingRect()
 
     def transformOriginPoint(self):
-        return self.itemBoundingRect().center()
+        return self.mapFromScene(self.itemBoundingRect().center())
 
     def mouseMoveEvent(self, event) -> None:
+        self.prepareGeometryChange()
+        self.update()
         for handler in self.transformation_handlers:
             handler.handle_mouse_move(event)
         super().mouseMoveEvent(event)
@@ -86,6 +99,7 @@ class SelectableRectItem(QGraphicsItem):
     def hoverLeaveEvent(self, event) -> None:
         self.setSelected(False)
 
+    # TODO: Match args to abstract class
     def paint(self, painter, option, widget) -> None:
         if self.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsSelectable == 0:
             return
@@ -97,29 +111,41 @@ class SelectableRectItem(QGraphicsItem):
             for handler in self.transformation_handlers:
                 painter.drawRect(handler.rect) # Make this dynamic... handler should implement paint?
 
-    def itemBoundingRect(self):
-        """ Convenience method for getting boundingRect of item in scene coordinates """
-        return self._item_boundingRect
+    def boundingRect(self):
+        path = QPainterPath()
+        path.addRect(self.itemBoundingRect())
+        for handler in self.transformation_handlers:
+            path.addRect(handler.rect)
+        return path.boundingRect()
 
-    def boundingRect(self) -> QRectF:
-        rect = self.itemBoundingRect()
-        handler_rects = [handler.rect for handler in self.transformation_handlers]
-        total_rect = reduce(lambda r1, r2: r1.united(r2),  handler_rects, rect)
-        return total_rect
+
 
     def rotatingRectIcon(self) -> QRectF:
-        handle_size = 8 # TODO: make this more dynamic
+        handle_size = 14 # TODO: make this more dynamic
         item_boundingRect = self.itemBoundingRect()
         center_right = QPointF(item_boundingRect.right(), item_boundingRect.center().y())
         return QRectF(center_right.x() - handle_size / 2, center_right.y() - handle_size / 2, handle_size, handle_size )
 
     def topRightStretchIcon(self) -> QRectF:
-        handle_size = 8
-        top_right = self.itemBoundingRect().topRight()
+        handle_size = 14
+        item_boundingRect = self.itemBoundingRect()
+        top_right = QPointF(item_boundingRect.right(), item_boundingRect.top())
         return QRectF(top_right.x() - handle_size / 2, top_right.y() - handle_size / 2, handle_size, handle_size)
 
+    def topLeftStretchIcon(self) -> QRectF:
+        handle_size = 14
+        item_boundingRect = self.itemBoundingRect()
+        top_left = QPointF(item_boundingRect.left(), item_boundingRect.top())
+        return QRectF(top_left.x() - handle_size / 2, top_left.y() - handle_size / 2, handle_size, handle_size)
 
-class StretchableLine(QGraphicsLineItem):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def bottomRightStretchIcon(self) -> QRectF:
+        handle_size = 14
+        item_boundingRect = self.itemBoundingRect()
+        bottom_right = QPointF(item_boundingRect.right(), item_boundingRect.bottom())
+        return QRectF(bottom_right.x() - handle_size / 2, bottom_right.y() - handle_size / 2, handle_size, handle_size)
 
+    def bottomLeftStretchIcon(self) -> QRectF:
+        handle_size = 14
+        item_boundingRect = self.itemBoundingRect()
+        bottom_left = QPointF(item_boundingRect.left(), item_boundingRect.bottom())
+        return QRectF(bottom_left.x() - handle_size / 2, bottom_left.y() - handle_size / 2, handle_size, handle_size)
