@@ -8,12 +8,10 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QGraphicsPathItem, QGraphi
                            QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsItem)
 from functools import reduce
 from math import comb, cos, sin
-import numpy as np
 
-""" I think we assume handler rects can not overlap """
 class TransformationHandler(ABC):
     @abstractmethod
-    def __init__(self, set_rect_callback, item):
+    def __init__(self, set_rect_callback, item): # TODO
         self.set_rect_callback = set_rect_callback
         self.rect = self.set_rect_callback()
         self.item = item
@@ -37,7 +35,6 @@ class RotationHandler(TransformationHandler):
         """
         self.set_rect_callback = set_rect_callback
         self.item = item
-        self._rect: QRectF = self.set_rect_callback()
         self.is_rotating = False
         self.is_resizing = False
         self.rotation_start_angle = 0
@@ -46,33 +43,38 @@ class RotationHandler(TransformationHandler):
         if self.rect.contains(self.item.mapFromScene(event.scenePos())):
             self.item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
             self.is_rotating = True
-            self.rotation_start_angle = self.angle(event.scenePos(), self.item.mapToScene(self.item.boundingRect().center()))
+            self.rotation_start_angle = self.angle(event.scenePos(), self.item.mapToScene(self.item.transformOriginPoint()))
 
     @staticmethod
-    def angle(p1: QPointF, p2: QPointF):
-        """ Returns the angle between the line p1 -> p2 and the x-axis """
+    def angle(p1: QPointF, p2: QPointF) -> float:
+        """ Returns angle of the line connecting p1 with p2, measured counter clockwise starting on the right of the x-axis (x > 0). Note that the angle
+        is measured from p1 to p2.
+        """
         return QLineF(p1, p2).angle()
 
     @property
     def rect(self):
         return self.set_rect_callback()
 
-    def handle_mouse_move(self, event):
+    def handle_mouse_move(self, event: QGraphicsSceneMouseEvent):
         if self.is_rotating:
+            # Modulo 360, degree of line origin -> event going clockwise
             current_angle = self.angle(event.scenePos(), self.item.mapToScene(self.item.transformOriginPoint()))
-            angle_diff = self.rotation_start_angle - current_angle
+            angle_diff = (self.rotation_start_angle - current_angle) % 360
 
-#            rotation = (self.item.rotation() + angle_diff)
             transform = self.build_transform(angle_diff)
             self.item.setTransform(transform, combine=True)
             self.rotation_start_angle = current_angle
 
-    def handle_mouse_release(self, event):
+    def handle_mouse_release(self, event: QGraphicsSceneMouseEvent):
         if self.is_rotating:
             self.item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
             self.is_rotating = False
 
-    def build_transform(self, degrees):
+    def build_transform(self, degrees: float):
+        """
+        degrees: the number of degrees
+        """
         center = self.item.mapToScene(self.item.transformOriginPoint())
         transform = QTransform()
         transform.translate(center.x(), center.y())
@@ -121,24 +123,27 @@ class ScaleHandler(TransformationHandler):
             self.item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
             self.stretching = True
 
-    def handle_mouse_move(self, event: QGraphicsSceneMouseEvent):
+    def handle_mouse_move(self, event):
         if self.stretching:
             new_coordinate = event.scenePos()
             edge_coordinate = self.edge_coordinate()
 
-            if new_coordinate.x() == 0 or edge_coordinate == 0 or edge_coordinate.y() == 0 or new_coordinate.y() == 0:
+            if new_coordinate.x() == 0 or edge_coordinate.x() == 0 or edge_coordinate.y() == 0 or new_coordinate.y() == 0:
                 return
 
-            x_scale_factor = new_coordinate.x() / edge_coordinate.x()
-            y_scale_factor = edge_coordinate.y() / new_coordinate.y()
+            delta_x = new_coordinate.x() - edge_coordinate.x()
+            delta_y = new_coordinate.y() - edge_coordinate.y()
 
             # Moving the cursor left has the inverse effect when draging a left corner compared with a right corner
             if "left" in self.corner:
-                x_scale_factor = 1 / x_scale_factor
+                delta_x = -delta_x
 
-            if "bottom" in self.corner:
-                y_scale_factor = 1 / y_scale_factor
+            if "top" in self.corner:
+                delta_y = -delta_y
 
+            bounding_rect = self.item.boundingRect()
+            x_scale_factor = (bounding_rect.width() + delta_x) / bounding_rect.width()
+            y_scale_factor = (bounding_rect.height() + delta_y) / bounding_rect.height()
             # Prevent large scaling factors
             if x_scale_factor > 0:
                 x_scale_factor_restricted = min(x_scale_factor, 1.5)
@@ -149,9 +154,9 @@ class ScaleHandler(TransformationHandler):
                 y_scale_factor_restricted = min(y_scale_factor, 1.5)
             else:
                 y_scale_factor_restricted = max(y_scale_factor, -1.5)
-
             transform = self.build_transform(x_scale_factor_restricted, y_scale_factor_restricted)
             self.item.setTransform(transform, combine=True)
+
 
     def handle_mouse_release(self, event: QGraphicsSceneMouseEvent):
         if self.stretching:

@@ -1,8 +1,8 @@
 import argparse as arg
 from PyQt6.QtWidgets import QApplication
 import sys
-from .window import MainWindow
-from . import tools
+from .graphics.window import MainWindow
+from .drawing import tools
 import logging
 import logging.config
 import json
@@ -30,14 +30,13 @@ def main():
     handler = tools.NullDrawingHandler(cont.handler_signal)
     cont.setHandler(handler)
     window.setController(cont)
+    file = args.file
 
-    if str(args.file).endswith(".svg") and Path(args.file).is_file():
-        window.load_svg(args.file)
+    if file and str(file[0]).endswith(".svg") and Path(file[0]).is_file():
+        window.open_with_svg(file[0])
 
     window.show()
     sys.exit(app.exec())
-
-
 
 if __name__ == "__main__":
     main()

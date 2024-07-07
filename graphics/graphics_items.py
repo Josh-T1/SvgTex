@@ -3,18 +3,16 @@ import sys
 import math
 from PyQt6.QtGui import QAction, QBrush, QColor, QFont, QMouseEvent, QPen, QPainterPath, QPainter, QTransform
 from PyQt6.QtCore import QLineF, QObject, QPoint, QPointF, Qt, pyqtBoundSignal, pyqtSignal, QRect, QRectF
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QGraphicsPathItem, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
-                           QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsItem)
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QGraphicsPathItem, QGraphicsTextItem, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
+                           QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsItem, QGraphicsRectItem)
 from functools import reduce
-from .transformations import RotationHandler, TransformationHandler, ScaleHandler
+from ..drawing.transformations import RotationHandler, TransformationHandler, ScaleHandler
 
-def extend_rec(rect: QRectF, margin):
-    return QRectF(rect.x() - margin, rect.y() - margin, rect.width() + 2 * margin, rect.height() + 2* margin)
 
-class SelectableRectItem(QGraphicsItem):
+class SelectableRectItem(QGraphicsRectItem):
     def __init__(self, item : QGraphicsItem, target_sig_name: str, select_signal: pyqtBoundSignal | None = None):
         super().__init__()
-        self.pen = QPen(Qt.GlobalColor.darkBlue, 2, Qt.PenStyle.DashLine)
+        self._pen = QPen(Qt.GlobalColor.darkBlue, 2, Qt.PenStyle.DashLine)
         self.item = item
         self.target_sig_name = target_sig_name
         self.item.setParentItem(self)
@@ -27,10 +25,10 @@ class SelectableRectItem(QGraphicsItem):
 
     def _register_transformation_handlers(self) -> list[TransformationHandler]:
         rotation_handler = RotationHandler(self.rotatingRectIcon, self)
-        stretch_handler_top_right = ScaleHandler(self.topRightStretchIcon, self, self.item.boundingRect, side="top_right")
-        stretch_handler_top_left = ScaleHandler(self.topLeftStretchIcon, self, self.item.boundingRect, side="top_left")
-        stretch_handler_bottom_right = ScaleHandler(self.bottomRightStretchIcon, self, self.item.boundingRect, side="bottom_right")
-        stretch_handler_bottom_left = ScaleHandler(self.bottomLeftStretchIcon, self, self.item.boundingRect, side="bottom_left")
+        stretch_handler_top_right = ScaleHandler(self.topRightStretchIcon, self, self.item.boundingRect, corner="top_right")
+        stretch_handler_top_left = ScaleHandler(self.topLeftStretchIcon, self, self.item.boundingRect, corner="top_left")
+        stretch_handler_bottom_right = ScaleHandler(self.bottomRightStretchIcon, self, self.item.boundingRect, corner="bottom_right")
+        stretch_handler_bottom_left = ScaleHandler(self.bottomLeftStretchIcon, self, self.item.boundingRect, corner="bottom_left")
         return [rotation_handler, stretch_handler_top_left, stretch_handler_top_right, stretch_handler_bottom_right, stretch_handler_bottom_left]
 
     def add_handler(self, handler: TransformationHandler) -> None:
@@ -106,7 +104,7 @@ class SelectableRectItem(QGraphicsItem):
         # TODO is the below line necessary, since this is a parent shouldnt the event propogate down by default?
 #        self.item.paint(painter, option, widget)
         if self.isSelected():
-            painter.setPen(self.pen)
+            painter.setPen(self._pen)
             painter.drawRect(self.itemBoundingRect())
             for handler in self.transformation_handlers:
                 painter.drawRect(handler.rect) # Make this dynamic... handler should implement paint?
