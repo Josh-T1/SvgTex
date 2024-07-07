@@ -5,12 +5,13 @@ from PyQt6.QtSvg import QSvgGenerator
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel, QMessageBox, QPinchGesture, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                              QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem)
-from ..drawing.tools import DrawingController, NullDrawingHandler
+from ..drawing.tools import DrawingController, NullDrawingHandler, Handlers
 from .graphics_items import SelectableRectItem
 from pathlib import Path
 import logging
 from collections import deque
-from ..keyboard_utils import KeyCodes
+from ..utils import KeyCodes
+from ..shortcuts.shortcuts import ShortcutCloseEvent, ShortcutManager
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +42,17 @@ class GraphicsView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     def mousePressEvent(self, event):
-        if self._controller:
+        if self._controller and event:
             self._controller.mousePressEvent(event)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self._controller:
+        if self._controller and event:
             self._controller.mouseMoveEvent(event)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        if self._controller:
+        if self._controller and event:
             self._controller.mouseReleaseEvent(event)
         super().mouseReleaseEvent(event)
 
@@ -62,7 +63,8 @@ class GraphicsView(QGraphicsView):
         return self._controller
 
     def wheelEvent(self, event):
-        event.ignore()
+        if event:
+            event.ignore()
 
     def resizeEvent(self, event):
 #        self.center_scene()
@@ -98,42 +100,22 @@ class ZoomableScrollArea(QScrollArea):
         return super().event(event)
 
 class GraphicsScene(QGraphicsScene):
-    def __init__(self, max = 5):
+    def __init__(self, shortcut_manager: ShortcutManager | None = None):
         super().__init__()
-        self.cache = deque()
-        self.cache_max = max
+        self.shortcut_manager = shortcut_manager
+
+    def setShortcutManager(self, shortcut_manager: ShortcutManager):
+        self.shortcut_manager = shortcut_manager
 
     def keyPressEvent(self, event: QKeyEvent | None):
-        # TODO : delete print statements
-        print(f"Event modifiers: {event.modifiers()}")
-        print(f"Key code: {event.key()}")
-        focus_item = self.focusItem()
-        print(focus_item)
-        if event is None:
-            return
-        # Figure out a better solution to this
-        if event.key() == KeyCodes.Key_Delete.value:
-            selected_items = self.selectedItems()
-            focus_item = self.focusItem()
-            if not isinstance(focus_item, QGraphicsTextItem):
-                for item in selected_items:
-                    self.removeItem(item)
-                    self.add_to_cache(item)
-
-        elif (event.key() == KeyCodes.Key_U.value and event.modifiers() == Qt.KeyboardModifier(Qt.KeyboardModifier.ShiftModifier)) and len(self.cache) > 0:
-            item = self.cache.pop()
-            self.addItem(item)
+        if self.shortcut_manager and event:
+            self.shortcut_manager.keyPress(event)
         super().keyPressEvent(event)
 
-    def add_to_cache(self, item):
-        if len(self.cache) > self.cache_max:
-            self.cache.popleft()
-        self.cache.append(item)
 
 class IntBox(QWidget):
     clicked = pyqtSignal(int)
     def __init__(self, default=2, upper_bound=10, lower_bound=0):
-
         super().__init__()
         self.box_layout = QHBoxLayout()
         self.value = default
@@ -219,7 +201,6 @@ class SingleCheckBox(QWidget):
                 return i
         return None
 
-
 class VToolBar(QWidget):
     """ Contains widgets related to customizing drawing tool.
     Implements interface for retreiving these user selection """
@@ -239,9 +220,9 @@ class VToolBar(QWidget):
     def _create_widgets(self):
         selector_box = QCheckBox("Selector")
         selector_box.setChecked(True)
-        self.tool_checkbox = SingleCheckBox(QCheckBox("Freehand"),
-                                            QCheckBox("Line"),
-                                            QCheckBox("Textbox"),
+        self.tool_checkbox = SingleCheckBox(QCheckBox(Handlers.Freehand.name),
+                                            QCheckBox(Handlers.Line.name),
+                                            QCheckBox(Handlers.Textbox.name),
                                             selector_box,
                                             fallback = selector_box.text())
         self.pen_size_selector_label = QLabel("Pen Width")
@@ -264,13 +245,19 @@ class VToolBar(QWidget):
     def connectToggleMenuButton(self, func: Callable[[], None]):
         self.toggle_menu_button.clicked.connect(func)
 
-class MainWindow(QMainWindow):
+class ModeView(QLabel):
     def __init__(self):
         super().__init__()
+
+    def notify(self, msg):
+        self.setText(msg)
+
+class MainWindow(QMainWindow):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self._filepath = None
         self.scene_default_width = 1052 * 0.75
         self.scene_default_height = 744 * 0.75
-#        self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, False)
         self.initUi()
 
     @property
@@ -305,14 +292,21 @@ class MainWindow(QMainWindow):
         save_action = QAction("Save", self)
         open_action = QAction("Open", self)
         self.filename_widget = QLabel(self.filename)
+        self.mode_label = ModeView()
         self.filename_widget.setStyleSheet('font-size: 16pt;')
-        spacer = QWidget()
+        spacer, spacer_2 = QWidget(), QWidget()
+        expanding_spacer = QWidget()
+        expanding_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         spacer.setFixedWidth(200)
+        spacer_2.setFixedWidth(50)
 
         toolbar.addAction(save_action)
         toolbar.addAction(open_action)
         toolbar.addWidget(spacer)
         toolbar.addWidget(self.filename_widget)
+        toolbar.addWidget(expanding_spacer)
+        toolbar.addWidget(self.mode_label)
+        toolbar.addWidget(spacer_2)
 
         save_action.triggered.connect(self.save_as_svg)
         open_action.triggered.connect(self._load_from_selection)
@@ -359,6 +353,11 @@ class MainWindow(QMainWindow):
         self.tool_bar.connectClickedTool(controller.setHandlerFromName)
         self.tool_bar.connectClickedPenWidth(controller.setPenWidth)
 
+    def setShortcutManager(self, shortcut_manager: ShortcutManager):
+        if self.scene:
+            shortcut_manager.add_listener(self.mode_label)
+            self._scene.setShortcutManager(shortcut_manager)
+
     @property
     def scene(self):
         return self.graphics_view.scene()
@@ -389,7 +388,15 @@ class MainWindow(QMainWindow):
         """ TODO: Make this better """
         if self.filename != UNSAVED_NAME:
             self.save()
-            event.accept()
+            return
+
+        if isinstance(event, ShortcutCloseEvent):
+            home_dir = Path().home()
+            num, attempts = 0, 0
+            while (home_dir / f"veditor_unamed_{num}").is_file() and attempts < 30:
+                num += 1
+            self.filepath = home_dir / f"veditor_unamed{num}"
+            self.save()
             return
 
         reply = QMessageBox.question(self, "Confirm Close", "Do you want to save before closing?",
@@ -441,7 +448,7 @@ class MainWindow(QMainWindow):
         else:
             signal = None
             handler = None
-        selectable_item = SelectableRectItem(svg_item,NullDrawingHandler.__name__ ,signal)
+        selectable_item = SelectableRectItem(svg_item, Handlers.Selector.value,signal)
         selectable_item.setScale(scale) # TODO determine scale based on width relative to window width, height width
         self._scene.addItem(selectable_item)
         # hack to 'refresh' signals.. without this loaded graphic won't be selectable untill selector button is pressed again
@@ -455,3 +462,6 @@ class MainWindow(QMainWindow):
         else:
             self.resize(self.width() + self.toggle_menu.width(), self.height())
             self.toggle_menu.show()
+
+    def modeView(self):
+        return self.mode_label

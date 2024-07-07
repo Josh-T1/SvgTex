@@ -7,6 +7,7 @@ import logging
 import logging.config
 import json
 from pathlib import Path
+from .shortcuts.shortcuts import ShortcutManager
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 def get_config():
@@ -27,9 +28,11 @@ def main():
     app = QApplication([])
     window = MainWindow()
     cont = tools.DrawingController()
+    shortcut_manager = ShortcutManager(window._scene, window.closeEvent)
     handler = tools.NullDrawingHandler(cont.handler_signal)
     cont.setHandler(handler)
     window.setController(cont)
+    window.setShortcutManager(shortcut_manager)
     file = args.file
 
     if file and str(file[0]).endswith(".svg") and Path(file[0]).is_file():

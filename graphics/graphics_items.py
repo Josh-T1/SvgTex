@@ -9,7 +9,7 @@ from functools import reduce
 from ..drawing.transformations import RotationHandler, TransformationHandler, ScaleHandler
 
 
-class SelectableRectItem(QGraphicsRectItem):
+class SelectableRectItem(QGraphicsItem):
     def __init__(self, item : QGraphicsItem, target_sig_name: str, select_signal: pyqtBoundSignal | None = None):
         super().__init__()
         self._pen = QPen(Qt.GlobalColor.darkBlue, 2, Qt.PenStyle.DashLine)
