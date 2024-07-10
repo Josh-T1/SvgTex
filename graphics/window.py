@@ -1,17 +1,20 @@
 from collections.abc import Callable
+import re
+import threading
 from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QGuiApplication, QKeyEvent, QMouseEvent, QPen, QPainter, QTransform
-from PyQt6.QtCore import QPointF, QRect, Qt, QRectF, pyqtSignal, QEvent, QSize
-from PyQt6.QtSvg import QSvgGenerator
+from PyQt6.QtCore import QByteArray, QPointF, QRect, Qt, QRectF, pyqtSignal, QEvent, QSize
+from PyQt6.QtSvg import QSvgGenerator, QSvgRenderer
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel, QMessageBox, QPinchGesture, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                              QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem)
-from ..drawing.tools import DrawingController, NullDrawingHandler, Handlers
+from matplotlib.pyplot import text
+from ..drawing.tools import ClippedTextItem, DrawingController, NullDrawingHandler, Handlers, Textbox
 from .graphics_items import SelectableRectItem
 from pathlib import Path
 import logging
-from collections import deque
-from ..utils import KeyCodes
 from ..shortcuts.shortcuts import ShortcutCloseEvent, ShortcutManager
+import io
+import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +102,7 @@ class ZoomableScrollArea(QScrollArea):
             return self.gestureEvent(event)
         return super().event(event)
 
-class GraphicsScene(QGraphicsScene):
+class TexGraphicsScene(QGraphicsScene):
     def __init__(self, shortcut_manager: ShortcutManager | None = None):
         super().__init__()
         self.shortcut_manager = shortcut_manager
@@ -112,6 +115,51 @@ class GraphicsScene(QGraphicsScene):
             self.shortcut_manager.keyPress(event)
         super().keyPressEvent(event)
 
+
+    def compile_latex(self):
+        for item in self.items():
+            print(item)
+            parent = item.parentItem()
+            if not isinstance(item, Textbox) or not isinstance(parent, SelectableRectItem):
+                continue
+
+            res_item = self.attempt_compile(item.text())
+#
+            if res_item is not None:
+                global_pos = item.mapToScene(item.boundingRect().topLeft())# - parent.pos()
+                res_item.setTransform(QTransform().translate(global_pos.x(), global_pos.y()))
+                parent.item = res_item
+
+                self.removeItem(item)
+                item.setParentItem(None)
+                del item
+
+
+    def attempt_compile(self, text):
+        if not self._text_is_latex(text):
+            return
+        svg_bytes = self.tex2svg(text)
+        svg_data = QByteArray(svg_bytes.read())
+        renderer = QSvgRenderer(svg_data)
+        item = QGraphicsSvgItem()
+        item.setSharedRenderer(renderer)
+        return item
+
+    def tex2svg(self, equation):
+        fig = plt.figure(figsize=(1, 1))
+        fig.text(0, 0, fr"{equation}", fontsize=16)
+        svg_data = io.BytesIO()
+        fig.savefig(svg_data, format="svg", bbox_inches="tight", pad_inches=0.1)
+        plt.close(fig)
+        svg_data.seek(0)
+        return svg_data
+
+    def _text_is_latex(self, text: str):
+        return text.count("$") == 2 and len(text) != 2
+
+
+        # comminicate value to parent process
+        # wait untill return value from parent process
 
 class IntBox(QWidget):
     clicked = pyqtSignal(int)
@@ -314,7 +362,7 @@ class MainWindow(QMainWindow):
 
     def _create_widgets(self):
         self.graphics_view = GraphicsView()
-        self._scene = GraphicsScene()
+        self._scene = TexGraphicsScene()
         self.tool_bar = VToolBar()
         self.toggle_menu = ToggleMenuWidget()
         scroll_widget = QWidget()
@@ -395,7 +443,7 @@ class MainWindow(QMainWindow):
             num, attempts = 0, 0
             while (home_dir / f"veditor_unamed_{num}").is_file() and attempts < 30:
                 num += 1
-            self.filepath = home_dir / f"veditor_unamed{num}"
+            self.filepath = str(home_dir / f"veditor_unamed{num}")
             self.save()
             return
 

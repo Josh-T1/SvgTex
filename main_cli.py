@@ -1,6 +1,7 @@
 import argparse as arg
 from PyQt6.QtWidgets import QApplication
 import sys
+from .utils import load_shortcuts
 from .graphics.window import MainWindow
 from .drawing import tools
 import logging
@@ -8,14 +9,9 @@ import logging.config
 import json
 from pathlib import Path
 from .shortcuts.shortcuts import ShortcutManager
+from .utils import lazy_import, load_shortcuts, config
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
-def get_config():
-    with open(CONFIG_PATH, 'r') as f:
-        config = json.load(f)
-    return config
 
-config = get_config()
 logging.config.dictConfig(config = config['vector-graphics-logging-config'])
 logger = logging.getLogger(__name__)
 
@@ -25,10 +21,17 @@ global_parser.add_argument("-f", "--file", nargs=1, action="store")
 def main():
     args = global_parser.parse_args()
 
+
     app = QApplication([])
     window = MainWindow()
     cont = tools.DrawingController()
     shortcut_manager = ShortcutManager(window._scene, window.closeEvent)
+#    shortcuts_module = lazy_import(config["user-shortcuts-path"])
+#    print(shortcuts_module, "m")
+#    if shortcuts_module:
+#        shortcuts = load_shortcuts(shortcuts_module)
+#        shortcut_manager.add_shortcut(shortcuts)
+
     handler = tools.NullDrawingHandler(cont.handler_signal)
     cont.setHandler(handler)
     window.setController(cont)

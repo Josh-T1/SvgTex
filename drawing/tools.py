@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
-from PyQt6.QtGui import  QColor, QKeyEvent, QMouseEvent, QPen, QPainterPath, QTextCursor
-from PyQt6.QtCore import  QObject, QPointF, Qt, pyqtBoundSignal, pyqtSignal,  QRectF, QSizeF
-from PyQt6.QtWidgets import (QGraphicsPathItem, QGraphicsTextItem, QGraphicsView,
+from PyQt6.QtGui import  QColor, QKeyEvent, QMouseEvent, QPen, QPainterPath, QTextCursor, QFont
+from PyQt6.QtCore import  QByteArray, QObject, QPointF, Qt, pyqtBoundSignal, pyqtSignal,  QRectF, QSizeF
+from PyQt6.QtWidgets import (QGraphicsItem, QGraphicsPathItem, QGraphicsTextItem, QGraphicsView,
                            QGraphicsScene, QGraphicsLineItem, QGraphicsRectItem)
+from PyQt6.QtSvg import QSvgRenderer
+from PyQt6.QtSvgWidgets import QGraphicsSvgItem
+
 from enum import Enum
 from ..graphics.graphics_items import SelectableRectItem
 from ..utils import KeyCodes
@@ -64,18 +67,19 @@ class Textbox(QGraphicsRectItem):
         self.moving = True
         self.default_message = "Text..."
 
-        self.text = ClippedTextItem(self.default_message, self.rect(), parent=self)
-        self.text.setTextWidth(rect.width())
-        self.text.setPos(self.rect().topLeft())
+        self.text_item: ClippedTextItem = ClippedTextItem(self.default_message, self.rect(), parent=self)
+        self.text_item.setFont(QFont("Times", 12))
+        self.text_item.setTextWidth(rect.width())
+        self.text_item.setPos(self.rect().topLeft())
         self.moving_pen = QPen(Qt.GlobalColor.darkYellow)
         self.stationary_pen = QPen(Qt.GlobalColor.transparent)
 
     def setRect(self, *args, **kwargs):
         super().setRect(*args, **kwargs)
-        self.text.setTextWidth(self.rect().width())
-        self.text.setClipRect(self.rect())
-        self.text.setPos(self.rect().topLeft())
-        self.text.update()
+        self.text_item.setTextWidth(self.rect().width())
+        self.text_item.setClipRect(self.rect())
+        self.text_item.setPos(self.rect().topLeft())
+        self.text_item.update()
 
     def paint(self, painter, option, widget=None):
         if self.moving:
@@ -90,20 +94,20 @@ class Textbox(QGraphicsRectItem):
         if event is None:
             return
         if event.key() == KeyCodes.Key_Delete.value:
-            cursor = self.text.textCursor()
+            cursor = self.text_item.textCursor()
             cursor.deletePreviousChar()
 
             event.accept()
 
         elif event.key() == KeyCodes.Key_Left.value:
-            cursor = self.text.textCursor()
+            cursor = self.text_item.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
-            self.text.setTextCursor(cursor)
+            self.text_item.setTextCursor(cursor)
 
         elif event.key() == KeyCodes.Key_Right.value:
-            cursor = self.text.textCursor()
+            cursor = self.text_item.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.NextCharacter)
-            self.text.setTextCursor(cursor)
+            self.text_item.setTextCursor(cursor)
         else:
             super().keyPressEvent(event)
 
@@ -114,6 +118,11 @@ class Textbox(QGraphicsRectItem):
             current_rect = self.rect()
             new_rect = transform.mapRect(current_rect)
             self.setRect(new_rect)
+
+    def text(self):
+        return self.text_item.toPlainText()
+
+
 
 class TextboxDrawingHandler(DrawingHandler):
     def __init__(self, handler_signal):
@@ -148,11 +157,14 @@ class TextboxDrawingHandler(DrawingHandler):
 
     def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         scene = view.scene()
-        if self.rect_item and scene:
+
+        if self.rect_item and scene and self.selectable_rect_item:
+            if self.selectable_rect_item.boundingRect().width() < 45:
+                scene.removeItem(self.selectable_rect_item)
             self.rect_item.moving = False
             self.rect_item = None
+            print(self.selectable_rect_item.boundingRect().width())
         self.drawing = False
-
 
 class LineDrawingHandler(DrawingHandler):
     """ Tool for drawing straight lines """
@@ -172,7 +184,7 @@ class LineDrawingHandler(DrawingHandler):
             self.current_line.setLine(self.start_point.x(), self.start_point.y(), end_point.x(), end_point.y())
             selectable_line = SelectableRectItem(self.current_line, Handlers.Selector.value, self.handler_signal)
             scene.addItem(selectable_line)
-
+            print(self.current_line.parentItem())
             self.start_point = None
             self.current_line = None
 

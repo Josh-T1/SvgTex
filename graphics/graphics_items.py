@@ -13,15 +13,28 @@ class SelectableRectItem(QGraphicsItem):
     def __init__(self, item : QGraphicsItem, target_sig_name: str, select_signal: pyqtBoundSignal | None = None):
         super().__init__()
         self._pen = QPen(Qt.GlobalColor.darkBlue, 2, Qt.PenStyle.DashLine)
+        self._item = None
         self.item = item
         self.target_sig_name = target_sig_name
-        self.item.setParentItem(self)
+
         self.setAcceptHoverEvents(True)
-        self.transformation_handlers: list[TransformationHandler] = self._register_transformation_handlers()
-        self.setTransformOriginPoint(self.item.boundingRect().center())
+
+
 
         if select_signal: # allow for setting after class init and
             select_signal.connect(self._toggle_active)
+    @property
+    def item(self) -> QGraphicsItem:
+        if not self._item:
+            raise TypeError("I dont think this is even possible...")
+        return self._item
+
+    @item.setter
+    def item(self, item: QGraphicsItem):
+        self._item = item
+        self._item.setParentItem(self)
+        self.setTransformOriginPoint(self.item.boundingRect().center())
+        self.transformation_handlers: list[TransformationHandler] = self._register_transformation_handlers()
 
     def _register_transformation_handlers(self) -> list[TransformationHandler]:
         rotation_handler = RotationHandler(self.rotatingRectIcon, self)
@@ -147,3 +160,4 @@ class SelectableRectItem(QGraphicsItem):
         item_boundingRect = self.itemBoundingRect()
         bottom_left = QPointF(item_boundingRect.left(), item_boundingRect.bottom())
         return QRectF(bottom_left.x() - handle_size / 2, bottom_left.y() - handle_size / 2, handle_size, handle_size)
+

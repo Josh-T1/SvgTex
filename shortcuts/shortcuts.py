@@ -1,3 +1,4 @@
+
 from collections.abc import Callable
 from enum import Enum
 from collections import deque
@@ -64,7 +65,6 @@ class ShortcutManager:
     def keyPress(self, event: QKeyEvent):
         print(f"Event modifiers: {event.modifiers()}")
         print(f"Key code: {event.key()}")
-
         for shortcut in self.shortcuts:
             if shortcut.triggered(self.mode.value, event.key(), event.modifiers()):
                 logger.info(f"Execting shortcut: {shortcut.name}")
@@ -72,6 +72,7 @@ class ShortcutManager:
 
     def add_listener(self, listener):
         self.listeners.append(listener)
+        listener.notify(self.mode.value)
 
     def notify_listeners(self, msg):
         for listener in self.listeners:
@@ -85,13 +86,17 @@ class ShortcutManager:
         self.mode = Modes.Normal
         self.notify_listeners(self.mode.value)
 
+    def compile_tex(self):
+        self.scene.compile_latex()
+
     def _set_sane_shortcuts(self):
         shortcuts = [
                 Shortcut(KeyCodes.Key_i, self.insert_mode, Modes.Normal, name="set insert mode", builtin=True),
                 Shortcut(KeyCodes.Key_esc, self.normal_mode, Modes.Insert, name="set normal mode", builtin=True),
                 Shortcut(KeyCodes.Key_Delete, self.delete_from_scene, Modes.Insert, name="delete from scene", builtin=True),
                 Shortcut(KeyCodes.Key_u, self.add_from_cache, Modes.Insert, name="Undo delete", modifiers=Qt.KeyboardModifier.ShiftModifier, builtin=True),
-                Shortcut(KeyCodes.Key_c, self._close_callback, Modes.Normal, name="Close Application", modifiers=Qt.KeyboardModifier.ControlModifier, builtin=True)
+                Shortcut(KeyCodes.Key_c, self._close_callback, Modes.Normal, name="Close Application", modifiers=Qt.KeyboardModifier.ControlModifier, builtin=True),
+                Shortcut(KeyCodes.Key_c, self.compile_tex, Modes.Normal, name="Compile embeded latex", modifiers=Qt.KeyboardModifier.ShiftModifier)
                 ]
         self.add_shortcut(shortcuts)
 
@@ -120,4 +125,3 @@ class ShortcutManager:
         if len(self.cache) > self.cache_max:
             self.cache.popleft()
         self.cache.append(item)
-
