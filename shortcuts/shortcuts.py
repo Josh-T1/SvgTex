@@ -87,6 +87,7 @@ class ShortcutManager:
         self.notify_listeners(self.mode.value)
 
     def compile_tex(self):
+        # figure out how to import without going circular
         self.scene.compile_latex()
 
     def _set_sane_shortcuts(self):
@@ -125,3 +126,4 @@ class ShortcutManager:
         if len(self.cache) > self.cache_max:
             self.cache.popleft()
         self.cache.append(item)
+

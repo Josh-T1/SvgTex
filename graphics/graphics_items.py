@@ -1,13 +1,8 @@
-from abc import ABC, abstractmethod
-import sys
-import math
-from PyQt6.QtGui import QAction, QBrush, QColor, QFont, QMouseEvent, QPen, QPainterPath, QPainter, QTransform
-from PyQt6.QtCore import QLineF, QObject, QPoint, QPointF, Qt, pyqtBoundSignal, pyqtSignal, QRect, QRectF
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QGraphicsPathItem, QGraphicsTextItem, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
-                           QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsItem, QGraphicsRectItem)
-from functools import reduce
+from PyQt6.QtGui import QColor, QFont, QPen, QPainterPath, QKeyEvent, QTextCursor
+from PyQt6.QtCore import QPointF, Qt, pyqtBoundSignal, QRectF
+from PyQt6.QtWidgets import (QGraphicsTextItem,QGraphicsItem, QGraphicsRectItem)
 from ..drawing.transformations import RotationHandler, TransformationHandler, ScaleHandler
-
+from ..utils import KeyCodes
 
 class SelectableRectItem(QGraphicsItem):
     def __init__(self, item : QGraphicsItem, target_sig_name: str, select_signal: pyqtBoundSignal | None = None):
@@ -18,11 +13,9 @@ class SelectableRectItem(QGraphicsItem):
         self.target_sig_name = target_sig_name
 
         self.setAcceptHoverEvents(True)
-
-
-
         if select_signal: # allow for setting after class init and
             select_signal.connect(self._toggle_active)
+
     @property
     def item(self) -> QGraphicsItem:
         if not self._item:
@@ -51,11 +44,9 @@ class SelectableRectItem(QGraphicsItem):
         if name == self.target_sig_name:
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
-#            self.active = True
         else:
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
-#            self.active = False
 
     def setTransform(self, matrix, combine=False) -> None:
         if round(matrix.determinant(), 3) != 1:
@@ -160,4 +151,80 @@ class SelectableRectItem(QGraphicsItem):
         item_boundingRect = self.itemBoundingRect()
         bottom_left = QPointF(item_boundingRect.left(), item_boundingRect.bottom())
         return QRectF(bottom_left.x() - handle_size / 2, bottom_left.y() - handle_size / 2, handle_size, handle_size)
+
+class ClippedTextItem(QGraphicsTextItem):
+    def __init__(self, text, clip_rect, parent=None):
+        super().__init__(text, parent)
+        self.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditable | Qt.TextInteractionFlag.TextSelectableByMouse
+                                     | Qt.TextInteractionFlag.TextEditorInteraction)
+        self.setDefaultTextColor(QColor(Qt.GlobalColor.black))
+        self.clipRect = clip_rect
+
+    def setClipRect(self, rect: QRectF):
+        self.clipRect = self.mapRectFromParent(rect)
+
+    def paint(self, painter, option, widget=None):
+        painter.setClipRect(self.clipRect)
+        super().paint(painter, option, widget)
+
+class Textbox(QGraphicsRectItem):
+    def __init__(self, rect: QRectF, parent=None):
+        super().__init__(rect, parent=parent)
+        self.moving = True
+        self.default_message = "Text..."
+
+        self.text_item: ClippedTextItem = ClippedTextItem(self.default_message, self.rect(), parent=self)
+        self.text_item.setFont(QFont("Times", 12))
+        self.text_item.setTextWidth(rect.width())
+        self.text_item.setPos(self.rect().topLeft())
+        self.moving_pen = QPen(Qt.GlobalColor.darkYellow)
+        self.stationary_pen = QPen(Qt.GlobalColor.transparent)
+
+    def setRect(self, *args, **kwargs):
+        super().setRect(*args, **kwargs)
+        self.text_item.setTextWidth(self.rect().width())
+        self.text_item.setClipRect(self.rect())
+        self.text_item.setPos(self.rect().topLeft())
+        self.text_item.update()
+
+    def paint(self, painter, option, widget=None):
+        if self.moving:
+            painter.setPen(self.moving_pen)
+            painter.drawRect(self.rect())
+        else:
+            painter.setPen(self.stationary_pen)
+            painter.drawRect(self.rect())
+#        super().paint(painter, option, widget)
+
+    def keyPressEvent(self, event: QKeyEvent | None):
+        if event is None:
+            return
+        if event.key() == KeyCodes.Key_Delete.value:
+            cursor = self.text_item.textCursor()
+            cursor.deletePreviousChar()
+
+            event.accept()
+
+        elif event.key() == KeyCodes.Key_Left.value:
+            cursor = self.text_item.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
+            self.text_item.setTextCursor(cursor)
+
+        elif event.key() == KeyCodes.Key_Right.value:
+            cursor = self.text_item.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.NextCharacter)
+            self.text_item.setTextCursor(cursor)
+        else:
+            super().keyPressEvent(event)
+
+    def setTransform(self, matrix, combine=False):
+        if round(matrix.determinant(), 3) == 1:
+            super().setTransform(matrix, combine)
+        else:
+            current_rect = self.rect()
+            new_rect = matrix.mapRect(current_rect)
+            self.setRect(new_rect)
+
+    def text(self):
+        return self.text_item.toPlainText()
 

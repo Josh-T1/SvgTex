@@ -1,13 +1,8 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-import sys
-import math
-from PyQt6.QtGui import QAction, QBrush, QColor, QMouseEvent, QMoveEvent, QPen, QPainterPath, QPainter, QTransform
-from PyQt6.QtCore import QEvent, QLineF, QObject, QPoint, QPointF, Qt, pyqtBoundSignal, pyqtSignal, QRect, QRectF
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QGraphicsPathItem, QGraphicsRectItem, QGraphicsSceneMouseEvent, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
-                           QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsItem)
-from functools import reduce
-from math import comb, cos, sin
+from PyQt6.QtGui import QTransform
+from PyQt6.QtCore import QLineF, QPointF, QRectF
+from PyQt6.QtWidgets import (QGraphicsSceneMouseEvent, QGraphicsItem)
 
 class TransformationHandler(ABC):
     @abstractmethod
@@ -156,7 +151,6 @@ class ScaleHandler(TransformationHandler):
                 y_scale_factor_restricted = max(y_scale_factor, -1.5)
             transform = self.build_transform(x_scale_factor_restricted, y_scale_factor_restricted)
             self.item.setTransform(transform, combine=True)
-
 
     def handle_mouse_release(self, event: QGraphicsSceneMouseEvent):
         if self.stretching:

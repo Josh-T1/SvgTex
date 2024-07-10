@@ -21,10 +21,10 @@ global_parser.add_argument("-f", "--file", nargs=1, action="store")
 def main():
     args = global_parser.parse_args()
 
-
     app = QApplication([])
     window = MainWindow()
     cont = tools.DrawingController()
+    # remove scene probably
     shortcut_manager = ShortcutManager(window._scene, window.closeEvent)
 #    shortcuts_module = lazy_import(config["user-shortcuts-path"])
 #    print(shortcuts_module, "m")
@@ -34,8 +34,8 @@ def main():
 
     handler = tools.NullDrawingHandler(cont.handler_signal)
     cont.setHandler(handler)
+    cont.setShortcutManager(shortcut_manager)
     window.setController(cont)
-    window.setShortcutManager(shortcut_manager)
     file = args.file
 
     if file and str(file[0]).endswith(".svg") and Path(file[0]).is_file():

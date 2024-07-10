@@ -1,14 +1,12 @@
 from abc import ABC, abstractmethod
-from PyQt6.QtGui import  QColor, QKeyEvent, QMouseEvent, QPen, QPainterPath, QTextCursor, QFont
-from PyQt6.QtCore import  QByteArray, QObject, QPointF, Qt, pyqtBoundSignal, pyqtSignal,  QRectF, QSizeF
-from PyQt6.QtWidgets import (QGraphicsItem, QGraphicsPathItem, QGraphicsTextItem, QGraphicsView,
-                           QGraphicsScene, QGraphicsLineItem, QGraphicsRectItem)
-from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtSvgWidgets import QGraphicsSvgItem
-
+from PyQt6.QtGui import QKeyEvent, QMouseEvent, QPen, QPainterPath
+from PyQt6.QtCore import QObject, Qt, pyqtBoundSignal, pyqtSignal,  QRectF
+from PyQt6.QtWidgets import (QGraphicsPathItem, QGraphicsView, QGraphicsScene, QGraphicsLineItem)
 from enum import Enum
-from ..graphics.graphics_items import SelectableRectItem
-from ..utils import KeyCodes
+
+import shortcuts
+from ..graphics.graphics_items import SelectableRectItem, Textbox
+from ..shortcuts.shortcuts import ShortcutManager
 
 class Handlers(Enum):
     Selector = "NullDrawingHandler"
@@ -46,84 +44,6 @@ class NullDrawingHandler(DrawingHandler):
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         pass
 
-class ClippedTextItem(QGraphicsTextItem):
-    def __init__(self, text, clip_rect, parent=None):
-        super().__init__(text, parent)
-        self.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditable | Qt.TextInteractionFlag.TextSelectableByMouse
-                                     | Qt.TextInteractionFlag.TextEditorInteraction)
-        self.setDefaultTextColor(QColor(Qt.GlobalColor.black))
-        self.clipRect = clip_rect
-
-    def setClipRect(self, rect: QRectF):
-        self.clipRect = self.mapRectFromParent(rect)
-
-    def paint(self, painter, option, widget=None):
-        painter.setClipRect(self.clipRect)
-        super().paint(painter, option, widget)
-
-class Textbox(QGraphicsRectItem):
-    def __init__(self, rect: QRectF, parent=None):
-        super().__init__(rect, parent=parent)
-        self.moving = True
-        self.default_message = "Text..."
-
-        self.text_item: ClippedTextItem = ClippedTextItem(self.default_message, self.rect(), parent=self)
-        self.text_item.setFont(QFont("Times", 12))
-        self.text_item.setTextWidth(rect.width())
-        self.text_item.setPos(self.rect().topLeft())
-        self.moving_pen = QPen(Qt.GlobalColor.darkYellow)
-        self.stationary_pen = QPen(Qt.GlobalColor.transparent)
-
-    def setRect(self, *args, **kwargs):
-        super().setRect(*args, **kwargs)
-        self.text_item.setTextWidth(self.rect().width())
-        self.text_item.setClipRect(self.rect())
-        self.text_item.setPos(self.rect().topLeft())
-        self.text_item.update()
-
-    def paint(self, painter, option, widget=None):
-        if self.moving:
-            painter.setPen(self.moving_pen)
-            painter.drawRect(self.rect())
-        else:
-            painter.setPen(self.stationary_pen)
-            painter.drawRect(self.rect())
-#        super().paint(painter, option, widget)
-
-    def keyPressEvent(self, event: QKeyEvent | None):
-        if event is None:
-            return
-        if event.key() == KeyCodes.Key_Delete.value:
-            cursor = self.text_item.textCursor()
-            cursor.deletePreviousChar()
-
-            event.accept()
-
-        elif event.key() == KeyCodes.Key_Left.value:
-            cursor = self.text_item.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
-            self.text_item.setTextCursor(cursor)
-
-        elif event.key() == KeyCodes.Key_Right.value:
-            cursor = self.text_item.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.NextCharacter)
-            self.text_item.setTextCursor(cursor)
-        else:
-            super().keyPressEvent(event)
-
-    def setTransform(self, transform, combine):
-        if round(transform.determinant(), 3) == 1:
-            super().setTransform(transform, combine)
-        else:
-            current_rect = self.rect()
-            new_rect = transform.mapRect(current_rect)
-            self.setRect(new_rect)
-
-    def text(self):
-        return self.text_item.toPlainText()
-
-
-
 class TextboxDrawingHandler(DrawingHandler):
     def __init__(self, handler_signal):
         super().__init__(handler_signal)
@@ -159,11 +79,12 @@ class TextboxDrawingHandler(DrawingHandler):
         scene = view.scene()
 
         if self.rect_item and scene and self.selectable_rect_item:
+            # prevent accidental creation of textbox item
             if self.selectable_rect_item.boundingRect().width() < 45:
                 scene.removeItem(self.selectable_rect_item)
+
             self.rect_item.moving = False
             self.rect_item = None
-            print(self.selectable_rect_item.boundingRect().width())
         self.drawing = False
 
 class LineDrawingHandler(DrawingHandler):
@@ -184,7 +105,6 @@ class LineDrawingHandler(DrawingHandler):
             self.current_line.setLine(self.start_point.x(), self.start_point.y(), end_point.x(), end_point.y())
             selectable_line = SelectableRectItem(self.current_line, Handlers.Selector.value, self.handler_signal)
             scene.addItem(selectable_line)
-            print(self.current_line.parentItem())
             self.start_point = None
             self.current_line = None
 
@@ -259,13 +179,13 @@ class FreeHandDrawingHandler(DrawingHandler):
 
 class DrawingController(QObject):
     """
-    Accepts QMouseEvents and delegates the drawing responsibility to its target DrawingHandler object.
+    Accepts QMouseEvents and QKeyEvent. QKeyEvent's are passed to ShortcutManager object and QMouseEvents are passed to DrawingHandler.
     Class properties such as 'tool' or 'handler' are updated by connecting their respective set{property} method to other QWidget signals. These
     properties are then used to alter the behaviour of DrawingHandler objects
     """
 
     handler_signal = pyqtSignal(str)
-    def __init__(self, scene_view: QGraphicsView | None = None, handler: DrawingHandler | None = None, tool: QPen | None = None):
+    def __init__(self, scene_view: QGraphicsView | None = None, handler: DrawingHandler | None = None, tool: QPen | None = None, shortcut_manager: ShortcutManager | None = None):
         """
         -- Params --
         scene_view: QGraphicsScene object
@@ -273,12 +193,17 @@ class DrawingController(QObject):
         """
         super().__init__()
         self.scene_view = scene_view
+        self.shortcut_manager = shortcut_manager
         self.handler = handler if handler is not None else NullDrawingHandler(handler_signal=self.handler_signal)
         self.tool = tool if tool is not None else QPen(Qt.GlobalColor.black)
         self.name_to_classname_mapping = {Handlers.Line.value: LineDrawingHandler,
                                           Handlers.Freehand.value: FreeHandDrawingHandler,
                                           Handlers.Selector.value: NullDrawingHandler,
                                           Handlers.Textbox.value: TextboxDrawingHandler}
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if self.shortcut_manager:
+            self.shortcut_manager.keyPress(event)
 
     def mousePressEvent(self, event: QMouseEvent):
         if self.handler and self.scene_view and self.tool:
@@ -314,3 +239,10 @@ class DrawingController(QObject):
 
     def setPenWidth(self, size: int) -> None:
         self.tool.setWidth(size)
+
+    def setShortcutManager(self, shortcut_manager: ShortcutManager):
+        self.shortcut_manager = shortcut_manager
+
+    def add_shortcut_listeners(self, listener):
+        if self.shortcut_manager:
+            self.shortcut_manager.add_listener(listener)

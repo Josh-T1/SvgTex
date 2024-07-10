@@ -1,21 +1,16 @@
 from collections.abc import Callable
-import re
-import threading
 from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QGuiApplication, QKeyEvent, QMouseEvent, QPen, QPainter, QTransform
 from PyQt6.QtCore import QByteArray, QPointF, QRect, Qt, QRectF, pyqtSignal, QEvent, QSize
 from PyQt6.QtSvg import QSvgGenerator, QSvgRenderer
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel, QMessageBox, QPinchGesture, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                              QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem)
-from matplotlib.pyplot import text
-from ..drawing.tools import ClippedTextItem, DrawingController, NullDrawingHandler, Handlers, Textbox
-from .graphics_items import SelectableRectItem
+from ..drawing.tools import DrawingController, NullDrawingHandler, Handlers, Textbox
+from .graphics_items import SelectableRectItem, Textbox
 from pathlib import Path
 import logging
 from ..shortcuts.shortcuts import ShortcutCloseEvent, ShortcutManager
-import io
-import matplotlib.pyplot as plt
-
+from ..utils import tex2svg, text_is_latex
 logger = logging.getLogger(__name__)
 
 UNSAVED_NAME = "No Name **"
@@ -39,10 +34,20 @@ class ToggleMenuWidget(QWidget):
 
 
 class GraphicsView(QGraphicsView):
-    def __init__(self, controller: None | DrawingController = None):
+    def __init__(self, controller: None | DrawingController = None, shortcut_manager: None | ShortcutManager = None):
         super().__init__()
         self._controller =  controller
+        self.shortcut_manager = shortcut_manager
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+
+    def setShortcutManager(self, shortcut_manager: ShortcutManager):
+        self.shortcut_manager = shortcut_manager
+
+    def keyPressEvent(self, event):
+        if self._controller and event:
+            self._controller.keyPressEvent(event)
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
         if self._controller and event:
@@ -70,7 +75,6 @@ class GraphicsView(QGraphicsView):
             event.ignore()
 
     def resizeEvent(self, event):
-#        self.center_scene()
         dpr = self.devicePixelRatioF()
         self.setTransform(QTransform().scale(dpr, dpr))
         super().resizeEvent(event)
@@ -103,63 +107,35 @@ class ZoomableScrollArea(QScrollArea):
         return super().event(event)
 
 class TexGraphicsScene(QGraphicsScene):
-    def __init__(self, shortcut_manager: ShortcutManager | None = None):
+    def __init__(self):
         super().__init__()
-        self.shortcut_manager = shortcut_manager
-
-    def setShortcutManager(self, shortcut_manager: ShortcutManager):
-        self.shortcut_manager = shortcut_manager
-
-    def keyPressEvent(self, event: QKeyEvent | None):
-        if self.shortcut_manager and event:
-            self.shortcut_manager.keyPress(event)
-        super().keyPressEvent(event)
-
 
     def compile_latex(self):
         for item in self.items():
-            print(item)
             parent = item.parentItem()
             if not isinstance(item, Textbox) or not isinstance(parent, SelectableRectItem):
                 continue
 
             res_item = self.attempt_compile(item.text())
-#
+
             if res_item is not None:
                 global_pos = item.mapToScene(item.boundingRect().topLeft())# - parent.pos()
                 res_item.setTransform(QTransform().translate(global_pos.x(), global_pos.y()))
                 parent.item = res_item
-
+                # not sure this is necessary
                 self.removeItem(item)
                 item.setParentItem(None)
                 del item
 
-
     def attempt_compile(self, text):
-        if not self._text_is_latex(text):
+        if not text_is_latex(text):
             return
-        svg_bytes = self.tex2svg(text)
+        svg_bytes = tex2svg(text)
         svg_data = QByteArray(svg_bytes.read())
         renderer = QSvgRenderer(svg_data)
         item = QGraphicsSvgItem()
         item.setSharedRenderer(renderer)
         return item
-
-    def tex2svg(self, equation):
-        fig = plt.figure(figsize=(1, 1))
-        fig.text(0, 0, fr"{equation}", fontsize=16)
-        svg_data = io.BytesIO()
-        fig.savefig(svg_data, format="svg", bbox_inches="tight", pad_inches=0.1)
-        plt.close(fig)
-        svg_data.seek(0)
-        return svg_data
-
-    def _text_is_latex(self, text: str):
-        return text.count("$") == 2 and len(text) != 2
-
-
-        # comminicate value to parent process
-        # wait untill return value from parent process
 
 class IntBox(QWidget):
     clicked = pyqtSignal(int)
@@ -241,7 +217,6 @@ class SingleCheckBox(QWidget):
             for box in self._checkboxes:
                 if box.text() == self.fallback:
                     box.setChecked(True)
-
 
     def selected(self):
         for i in self._checkboxes:
@@ -400,11 +375,8 @@ class MainWindow(QMainWindow):
         self.graphics_view.setController(controller)
         self.tool_bar.connectClickedTool(controller.setHandlerFromName)
         self.tool_bar.connectClickedPenWidth(controller.setPenWidth)
-
-    def setShortcutManager(self, shortcut_manager: ShortcutManager):
         if self.scene:
-            shortcut_manager.add_listener(self.mode_label)
-            self._scene.setShortcutManager(shortcut_manager)
+            controller.add_shortcut_listener(self.mode_label)
 
     @property
     def scene(self):
