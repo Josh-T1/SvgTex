@@ -15,7 +15,7 @@ class DrawingController(QObject):
     handler_signal = pyqtSignal(str)
     def __init__(self, handler: DrawingHandler | PaintHandler | None = None,
                  scene_view: QGraphicsView | None = None,
-                 tool: QPen | None = None,
+                 pen: QPen | None = None,
                  shortcut_manager: ShortcutManager | None = None,
                  brush: QBrush | None = None
                  ):
@@ -28,7 +28,7 @@ class DrawingController(QObject):
         self.scene_view = scene_view
         self.shortcut_manager = shortcut_manager
         self.handler = handler if handler is not None else NullDrawingHandler(handler_signal=self.handler_signal)
-        self.tool = tool if tool is not None else QPen(Qt.GlobalColor.black)
+        self.pen = pen if pen is not None else QPen(Qt.GlobalColor.black)
         self.brush = brush if brush is not None else QBrush(Qt.GlobalColor.black)
         self.name_to_classname_mapping = {Handlers.Line.value: LineDrawingHandler,
                                           Handlers.Freehand.value: FreeHandDrawingHandler,
@@ -45,38 +45,38 @@ class DrawingController(QObject):
             self.shortcut_manager.keyPress(event)
 
     def mousePressEvent(self, event: QMouseEvent):
-        if self.handler and self.scene_view and self.tool:
+        if self.handler and self.scene_view and self.pen:
             if isinstance(self.handler, DrawingHandler):
-                self.handler.mousePress(self.scene_view, event, self.tool)
+                self.handler.mousePress(self.scene_view, event, self.pen)
             else:
                 self.handler.mousePress(self.scene_view, event, self.brush)
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if (isinstance(self.handler, DrawingHandler)
             and self.scene_view
-            and self.tool):
-            self.handler.mouseMove(self.scene_view, event, self.tool)
+            and self.pen):
+            self.handler.mouseMove(self.scene_view, event, self.pen)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if (isinstance(self.handler, DrawingHandler)
             and self.scene_view is not None
-            and self.tool):
-            self.handler.mouseRelease(self.scene_view, event, self.tool)
+            and self.pen):
+            self.handler.mouseRelease(self.scene_view, event, self.pen)
 
     def setSceneView(self, scene_view: QGraphicsView) -> None:
         self.scene_view = scene_view
 
     def setPenWidth(self, size: int) -> None:
-        self.tool.setWidth(size)
+        self.pen.setWidth(size)
 
     def setPenColor(self, color: QColor):
-        self.tool.setColor(color)
+        self.pen.setColor(color)
 
     def setShortcutManager(self, shortcut_manager: ShortcutManager):
         self.shortcut_manager = shortcut_manager
 
     def setFill(self, color: QColor):
-        self.tool.setBrush(color)
+        self.brush.setColor(color)
 
     def setHandler(self, handler: DrawingHandler | FillPaintHandler):
         self.handler = handler

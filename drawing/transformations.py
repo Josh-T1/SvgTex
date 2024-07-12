@@ -200,6 +200,9 @@ class ScaleHandler(TransformationHandler):
                 y_scale_factor_restricted = min(y_scale_factor, 1.5)
             else:
                 y_scale_factor_restricted = max(y_scale_factor, -1.5)
+
+            x_scale_factor_restricted = x_scale_factor_restricted if bounding_rect.width() > 20 or x_scale_factor_restricted > 1 else 1
+            y_scale_factor_restricted = y_scale_factor_restricted if bounding_rect.height() > 20 or y_scale_factor_restricted > 1 else 1
             transform = self.build_transform(x_scale_factor_restricted, y_scale_factor_restricted)
             self.item.setTransform(transform, combine=True)
 
@@ -238,7 +241,7 @@ class ScaleHandler(TransformationHandler):
             return transform
 
         transform.translate(translate_center.x() , translate_center.y())
-        transform.scale(x_scale_factor, y_scale_factor)
+        transform.scale(abs(x_scale_factor), abs(y_scale_factor))
         transform.translate(-translate_center.x() , -translate_center.y())
 
         return transform

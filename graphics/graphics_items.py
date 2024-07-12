@@ -30,6 +30,7 @@ class SelectableRectItem(QGraphicsItem):
         super().__init__()
         self._pen = QPen(Qt.GlobalColor.darkBlue, 2, Qt.PenStyle.DashLine)
         self._item = None
+        self.selector_name = None
         self.item = item
 
         self.setAcceptHoverEvents(True)
@@ -46,6 +47,8 @@ class SelectableRectItem(QGraphicsItem):
     def item(self, item: QGraphicsItem):
         self._item = item
         self._item.setParentItem(self)
+        if hasattr(item, "setBrush"):
+            item.setOpacity(1.0)
 #        self.setTransformOriginPoint(self.item.boundingRect().center())
         self.transformation_handlers: list[TransformationHandler] = self._register_transformation_handlers()
 
@@ -69,17 +72,19 @@ class SelectableRectItem(QGraphicsItem):
         self.transformation_handlers.append(handler)
 
     def _toggle_active(self, name: str) -> None:
-        print(name)
+
         if name == Handlers.Selector.value:
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
+            self.selector_name = name
         elif name == Handlers.Fill.value:
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
+            self.selector_name = name
         else:
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
-
+            self.selector_name = None
     def setTransform(self, matrix, combine=False) -> None:
         if round(matrix.determinant(), 3) != 1:
             self.item.setTransform(matrix, combine=combine)
@@ -111,19 +116,19 @@ class SelectableRectItem(QGraphicsItem):
 
     def transformOriginPoint(self):
         return self.item.boundingRect().topLeft()
-#        return self.mapFromScene(self.itemBoundingRect().center())
-#        return self.boundingRect().topLeft()
-#        return self.mapFromScene(self.itemBoundingRect().topLeft())
 
     def mouseMoveEvent(self, event) -> None:
         self.prepareGeometryChange()
         self.update()
-
+        if self.selector_name == Handlers.Fill.value:
+            return
         for handler in self.transformation_handlers:
             handler.handle_mouse_move(event)
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event) -> None:
+        if self.selector_name == Handlers.Fill.value:
+            return
         for handler in self.transformation_handlers:
             handler.handle_mouse_press(event)
         super().mousePressEvent(event)
@@ -133,22 +138,34 @@ class SelectableRectItem(QGraphicsItem):
             handler.handle_mouse_release(event)
         super().mouseReleaseEvent(event)
 
-
-
     # TODO: Match args to abstract class
     def paint(self, painter, option, widget) -> None:
         if self.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsSelectable == 0:
             return
+
         # TODO is the below line necessary, since this is a parent shouldnt the event propogate down by default?
 #        self.item.paint(painter, option, widget)
         if self.isSelected():
+            self.setZValue(1)
             painter.setPen(self._pen)
             painter.drawRect(self.itemBoundingRect())
+
+            if self.selector_name != Handlers.Selector.value:
+                return
+
             for handler in self.transformation_handlers:
                 painter.drawRect(handler.rect) # Make this dynamic... handler should implement paint?
 
+        else:
+            self.setZValue(0)
+
     def setBrush(self, *args):
         method = getattr(self.item, "setBrush", None)
+        if callable(method):
+            method(*args)
+
+    def setPen(self, *args):
+        method = getattr(self.item, "setPen", None)
         if callable(method):
             method(*args)
 
