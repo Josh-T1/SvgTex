@@ -6,9 +6,9 @@ from .graphics.window import MainWindow
 from .drawing import tools
 import logging
 import logging.config
-import json
 from pathlib import Path
-from .shortcuts.shortcuts import ShortcutManager
+from .control.shortcut_manager import ShortcutManager
+from .control.drawing_controller import DrawingController
 from .utils import lazy_import, load_shortcuts, config
 
 
@@ -23,7 +23,7 @@ def main():
 
     app = QApplication([])
     window = MainWindow()
-    cont = tools.DrawingController()
+    cont = DrawingController()
     # remove scene probably
     shortcut_manager = ShortcutManager(window._scene, window.closeEvent)
 #    shortcuts_module = lazy_import(config["user-shortcuts-path"])

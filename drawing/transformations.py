@@ -1,15 +1,19 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from PyQt6.QtGui import QTransform
-from PyQt6.QtCore import QLineF, QPointF, QRectF
+from PyQt6.QtCore import QLineF, QPointF, QRectF, QObject
 from PyQt6.QtWidgets import (QGraphicsSceneMouseEvent, QGraphicsItem)
+import math
 
 class TransformationHandler(ABC):
     @abstractmethod
     def __init__(self, set_rect_callback, item): # TODO
         self.set_rect_callback = set_rect_callback
-        self.rect = self.set_rect_callback()
         self.item = item
+
+    @property
+    def rect(self):
+        return self.set_rect_callback()
     @abstractmethod
     def handle_mouse_move(self, event):
         pass
@@ -28,8 +32,7 @@ class RotationHandler(TransformationHandler):
         set_rect_callback: Callable that returns QRectF object representing the are in which RotationHandler will handle mouseEvents
         item: the QGraphicsItem for which RotationHandler is implementing rotation behaviour
         """
-        self.set_rect_callback = set_rect_callback
-        self.item = item
+        super().__init__(set_rect_callback, item)
         self.is_rotating = False
         self.is_resizing = False
         self.rotation_start_angle = 0
@@ -38,7 +41,8 @@ class RotationHandler(TransformationHandler):
         if self.rect.contains(self.item.mapFromScene(event.scenePos())):
             self.item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
             self.is_rotating = True
-            self.rotation_start_angle = self.angle(event.scenePos(), self.item.mapToScene(self.item.transformOriginPoint()))
+#            self.rotation_start_angle = self.angle(event.scenePos(), self.item.transform().map(self.item.boundingRect().center()))
+            self.rotation_start_angle = self.angle(event.scenePos(), self.item.mapToScene(self.item.boundingRect().center()))
 
     @staticmethod
     def angle(p1: QPointF, p2: QPointF) -> float:
@@ -54,9 +58,9 @@ class RotationHandler(TransformationHandler):
     def handle_mouse_move(self, event: QGraphicsSceneMouseEvent):
         if self.is_rotating:
             # Modulo 360, degree of line origin -> event going clockwise
-            current_angle = self.angle(event.scenePos(), self.item.mapToScene(self.item.transformOriginPoint()))
+#            current_angle = self.angle(event.scenePos(), self.item.transform().map(self.item.boundingRect().center()))
+            current_angle = self.angle(event.scenePos(), self.item.mapToScene(self.item.boundingRect().center()))
             angle_diff = (self.rotation_start_angle - current_angle) % 360
-
             transform = self.build_transform(angle_diff)
             self.item.setTransform(transform, combine=True)
             self.rotation_start_angle = current_angle
@@ -70,12 +74,54 @@ class RotationHandler(TransformationHandler):
         """
         degrees: the number of degrees
         """
-        center = self.item.mapToScene(self.item.transformOriginPoint())
+        center = self.item.boundingRect().center()
         transform = QTransform()
-        transform.translate(center.x(), center.y())
+        transform.translate(center.x() , center.y() )
         transform.rotate(degrees)
-        transform.translate(-center.x(), -center.y())
+        transform.translate(-center.x() , -center.y() )
         return transform
+
+class TestHandler(TransformationHandler):
+    def __init__(self, set_rect_callback, item: QGraphicsItem, bounding_rect_callback):
+        super().__init__(set_rect_callback, item)
+        self.bounding_rect_callback = bounding_rect_callback
+        self.mirror = 1
+    def handle_mouse_move(self, event):
+        pass
+
+    def handle_mouse_press(self, event):
+        if self.rect.contains(self.item.mapFromScene(event.scenePos())):
+            t = self.build_transform()
+            self.item.setTransform(t, combine=True)
+
+    def handle_mouse_release(self, event):
+        pass
+
+    def _get_corner(self, top: bool, left: bool):
+        bounding_rect = self.item.itemBoundingRect()
+        corners = [bounding_rect.topLeft(), bounding_rect.topRight(), bounding_rect.bottomLeft(), bounding_rect.bottomRight()]
+        corners = [(self.item.mapToScene(corner), corner) for corner in corners]
+        middle = self.item.mapToScene(QPointF(bounding_rect.left() + bounding_rect.width() / 2 -14 , bounding_rect.top() +  bounding_rect.height()/2 -14))
+        func_left = lambda x: x <= middle.x() if left else lambda x: x >= middle.x()
+        func_top = lambda y: y <= middle.y() if top else lambda y: y >= middle.y()
+        for corner_mapped, corner in corners:
+            if func_top(corner_mapped.y()) and func_left(corner_mapped.x()):
+                return  corner
+        return None
+
+    def build_transform(self):
+        transform = QTransform()
+
+        corner = self.item.mapFromScene(self._get_corner(True, True))
+        if corner is None:
+            return transform
+        transform.translate(corner.x(), corner.y())
+        transform.scale(1.2, 1)
+        transform.translate(-corner.x(), -corner.y())
+#        transform.translate(100, 0)
+#        relative_transform = self.item.sceneTransform().inverted()[0] * transform
+        return transform
+
 
 class ScaleHandler(TransformationHandler):
     """
@@ -86,32 +132,37 @@ class ScaleHandler(TransformationHandler):
     -- Limitations --
     1. We can not invert item. If you drag the top left corner towards the top right corner, you can not pass the top right corner. There is also glitching when you get close or the width of the image
     becomes tiny.
-
-    2. Class is messy
-    We need a bounding rect for determing the translation required to implement fixed point scaling. Would
-    be nice to use self.item.boundingRect() but this does not work when the item is a SelectableRect. It feels messy passing in a bunch of callbacks..."""
-    def __init__(self, set_rect_callback: Callable[[], QRectF],item: QGraphicsItem, bounding_rect_callback: Callable[[], QRectF], corner: str = "top_right"):
+    """
+    def __init__(self, set_rect_callback: Callable[[], QRectF],item: QGraphicsItem, bounding_rect_callback: Callable[[], QRectF]):
         """
         -- Params --
-        set_rect_callback: Callable that returns the QRectF object representing the are in which the handler should implement its functionality
+        set_rect_callback: Callable that returns the QRectF object representing the QRectF in which the handler should implement its functionality
         item: QGraphicsItem wich is the target of the scaling
         bounding_rect_callback: Callable wich returns the QRectF object representing the bounding rectangle of self.item
         corner: of the form '(top/down)_(right/left)'. The corner of items's bounding rectangle on which handler rect resides.
         """
-        self.set_rect_callback = set_rect_callback
+        super().__init__(set_rect_callback, item)
         self.bounding_rect_callback = bounding_rect_callback
-        self.item = item
         self.stretching = False
-        self.corner = corner
 
     def edge_coordinate(self):
         """ Scene coordinates for the center of the handler rectangle  """
         return self.item.mapToScene(self.rect.center())
 
-    @property
-    def rect(self):
-        """ Returns the handler rect (QRectF object) """
-        return self.set_rect_callback()
+    def scene_corner(self):
+        corner_center = self.set_rect_callback().topLeft()
+        bounding_top_left = self.item.boundingRect().topLeft()
+        top = round(corner_center.y() - bounding_top_left.y(), 3) == 0
+        left = round(corner_center.x() - bounding_top_left.x(), 3) == 0
+        return top, left
+
+    def local_corner(self):
+        corner_center = self.item.mapToScene(self.set_rect_callback().topLeft())
+        bounding_rect = self.item.mapRectToScene(self.item.boundingRect())
+        middle = QPointF(bounding_rect.left() +7 + (bounding_rect.width()-14) / 2 , bounding_rect.top() +7 + (bounding_rect.height() -14) / 2 )
+        top = corner_center.y() < middle.y()
+        left = corner_center.x() < middle.x()
+        return top, left
 
     def handle_mouse_press(self, event: QGraphicsSceneMouseEvent):
         if self.rect.contains(self.item.mapFromScene(event.scenePos())):
@@ -120,8 +171,8 @@ class ScaleHandler(TransformationHandler):
 
     def handle_mouse_move(self, event):
         if self.stretching:
-            new_coordinate = event.scenePos()
-            edge_coordinate = self.edge_coordinate()
+            new_coordinate = self.item.mapFromScene(event.scenePos())
+            edge_coordinate = self.rect.center()
 
             if new_coordinate.x() == 0 or edge_coordinate.x() == 0 or edge_coordinate.y() == 0 or new_coordinate.y() == 0:
                 return
@@ -130,15 +181,15 @@ class ScaleHandler(TransformationHandler):
             delta_y = new_coordinate.y() - edge_coordinate.y()
 
             # Moving the cursor left has the inverse effect when draging a left corner compared with a right corner
-            if "left" in self.corner:
+            top, left = self.scene_corner()
+            if left:
                 delta_x = -delta_x
 
-            if "top" in self.corner:
+            if top:
                 delta_y = -delta_y
-
             bounding_rect = self.item.boundingRect()
-            x_scale_factor = (bounding_rect.width() + delta_x) / bounding_rect.width()
-            y_scale_factor = (bounding_rect.height() + delta_y) / bounding_rect.height()
+            x_scale_factor = (bounding_rect.width() + delta_x) / max(bounding_rect.width(), 10)
+            y_scale_factor = (bounding_rect.height() + delta_y) / max(bounding_rect.height(), 10)
             # Prevent large scaling factors
             if x_scale_factor > 0:
                 x_scale_factor_restricted = min(x_scale_factor, 1.5)
@@ -157,20 +208,37 @@ class ScaleHandler(TransformationHandler):
             self.item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
             self.stretching = False
 
+    def _get_corner(self, top: bool, left: bool):
+        bounding_rect = self.bounding_rect_callback()
+#        corners = [bounding_rect.topLeft() + QPointF(7, 7), bounding_rect.topRight() + QPointF(-7, 7), bounding_rect.bottomLeft() + QPointF(7, -7), bounding_rect.bottomRight() + QPointF(-7, -7)]
+        corners = [bounding_rect.topLeft() , bounding_rect.topRight() , bounding_rect.bottomLeft() , bounding_rect.bottomRight() ]
+
+        corners = [(self.item.mapToScene(corner), corner) for corner in corners]
+        bounding_rect = self.item.mapRectToScene(bounding_rect)
+        middle = QPointF(bounding_rect.left() +7 + (bounding_rect.width()-14) / 2 , bounding_rect.top() +7 + (bounding_rect.height() -14) / 2 )
+        def left_f(x):
+            if left:
+                return x <= middle.x()
+            return x >= middle.x()
+        def top_f(y):
+            if top:
+                return y <= middle.y()
+            return y >= middle.y()
+        for corner_mapped, corner in corners:
+            if top_f(corner_mapped.y()) and left_f(corner_mapped.x()):
+                return corner
+        return None
+
     def build_transform(self, x_scale_factor: float, y_scale_factor: float):
         """ Create QTransform required to scale item fixed to the opposing diagonal corner """
-        bounding_rect = self.bounding_rect_callback()
-        if self.corner == "top_right":
-            translate_center = bounding_rect.bottomLeft()
-        elif self.corner == "top_left":
-            translate_center = bounding_rect.bottomRight()
-        elif self.corner == "bottom_right":
-            translate_center = bounding_rect.topLeft()
-        else:
-            translate_center = bounding_rect.topRight()
-
+        top, left = self.local_corner()
         transform = QTransform()
+        translate_center = self._get_corner(not top, not left)
+        if translate_center is None:
+            return transform
+
         transform.translate(translate_center.x() , translate_center.y())
         transform.scale(x_scale_factor, y_scale_factor)
         transform.translate(-translate_center.x() , -translate_center.y())
+
         return transform

@@ -1,16 +1,17 @@
 from collections.abc import Callable
-from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QGuiApplication, QKeyEvent, QMouseEvent, QPen, QPainter, QTransform
+from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QColor, QGuiApplication, QKeyEvent, QMouseEvent, QPen, QPainter, QTransform
 from PyQt6.QtCore import QByteArray, QPointF, QRect, Qt, QRectF, pyqtSignal, QEvent, QSize
 from PyQt6.QtSvg import QSvgGenerator, QSvgRenderer
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel, QMessageBox, QPinchGesture, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel, QMessageBox, QPinchGesture, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                              QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem)
-from ..drawing.tools import DrawingController, NullDrawingHandler, Handlers, Textbox
+from ..drawing.tools import NullDrawingHandler, Textbox
+from ..control.drawing_controller import DrawingController
 from .graphics_items import SelectableRectItem, Textbox
 from pathlib import Path
 import logging
-from ..shortcuts.shortcuts import ShortcutCloseEvent, ShortcutManager
-from ..utils import tex2svg, text_is_latex
+from ..control.shortcut_manager import ShortcutCloseEvent, ShortcutManager
+from ..utils import tex2svg, text_is_latex, Handlers
 logger = logging.getLogger(__name__)
 
 UNSAVED_NAME = "No Name **"
@@ -131,6 +132,8 @@ class TexGraphicsScene(QGraphicsScene):
         if not text_is_latex(text):
             return
         svg_bytes = tex2svg(text)
+        if not svg_bytes:
+            return
         svg_data = QByteArray(svg_bytes.read())
         renderer = QSvgRenderer(svg_data)
         item = QGraphicsSvgItem()
@@ -224,6 +227,66 @@ class SingleCheckBox(QWidget):
                 return i
         return None
 
+class ColorBar(QWidget):
+
+    clicked = pyqtSignal(QColor)
+    def __init__(self):
+        super().__init__()
+        self.default_color_buttons = []
+        self._layout = QVBoxLayout()
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self.initUi()
+        self.setLayout(self._layout)
+
+    def initUi(self):
+        self.default_colors = [
+                QColor("black"),
+                QColor("red"),
+                QColor("green"),
+                QColor("blue"),
+                QColor("yellow"),
+                ]
+        first_row = QHBoxLayout()
+        first_row.setContentsMargins(0, 0, 0, 0)
+        second_row = QHBoxLayout()
+        for color in self.default_colors:
+            btn = QPushButton()
+            btn.setStyleSheet(f"background-color: {color.name()}")
+            btn.setProperty("QColor", color)
+            btn.setFixedSize(QSize(20, 20))
+            first_row.addWidget(btn)
+            self.default_color_buttons.append(btn)
+
+        self.custom_color_widget = QPushButton("Color Pallet")
+        self.custom_color_display = QPushButton()
+        self.custom_color_display.setFixedSize(QSize(20, 20))
+
+        self.custom_color_display.setProperty('QColor', QColor("black"))
+        self.custom_color_display.setStyleSheet("background-color: black")
+
+        second_row.addWidget(self.custom_color_widget)
+        second_row.addWidget(self.custom_color_display)
+        self._layout.addLayout(first_row)
+        self._layout.addLayout(second_row)
+
+        self.connect_buttons()
+
+    def custom_color_callback(self):
+        color = QColorDialog.getColor()
+        if color.isValid():
+            self.clicked.emit(color)
+            self.custom_color_display.setStyleSheet(f"background-color: {color.name()}")
+            self.custom_color_display.setProperty('QColor', color)
+
+    def custom_color_display_callback(self):
+        self.clicked.emit(self.custom_color_display.property("QColor"))
+
+    def connect_buttons(self):
+        for button in self.default_color_buttons:
+            button.clicked.connect(lambda _, color=button.property("QColor"): self.clicked.emit(color))
+        self.custom_color_display.clicked.connect(self.custom_color_display_callback)
+        self.custom_color_widget.clicked.connect(self.custom_color_callback)
+
 class VToolBar(QWidget):
     """ Contains widgets related to customizing drawing tool.
     Implements interface for retreiving these user selection """
@@ -246,19 +309,26 @@ class VToolBar(QWidget):
         self.tool_checkbox = SingleCheckBox(QCheckBox(Handlers.Freehand.name),
                                             QCheckBox(Handlers.Line.name),
                                             QCheckBox(Handlers.Textbox.name),
+                                            QCheckBox(Handlers.Rect.name),
+                                            QCheckBox(Handlers.Ellipse.name),
+                                            QCheckBox(Handlers.Fill.name),
                                             selector_box,
                                             fallback = selector_box.text())
         self.pen_size_selector_label = QLabel("Pen Width")
         self.pen_size_selector = IntBox()
         self.toggle_menu_button = QPushButton("Toggle Menu")
-#        self.width_widget =
+        self.color_selection = ColorBar()
+        self.fill_color_selection = ColorBar()
+
     def _add_widgets(self):
         self.toolbar_layout.addWidget(self.tool_checkbox)
         self.toolbar_layout.addStretch()
         self.toolbar_layout.addWidget(self.pen_size_selector_label)
         self.toolbar_layout.addWidget(self.pen_size_selector)
         self.toolbar_layout.addWidget(self.toggle_menu_button)
-
+        self.toolbar_layout.addWidget(self.color_selection)
+        self.toolbar_layout.addWidget(QLabel("Fill Color"))
+        self.toolbar_layout.addWidget(self.fill_color_selection)
     def connectClickedTool(self, func: Callable):
         self.tool_checkbox.clicked.connect(func)
 
@@ -267,6 +337,13 @@ class VToolBar(QWidget):
 
     def connectToggleMenuButton(self, func: Callable[[], None]):
         self.toggle_menu_button.clicked.connect(func)
+
+    def connectColorSelection(self, func: Callable[[QColor], None]):
+        self.color_selection.clicked.connect(func)
+
+    def connectFillColorSelection(self, func: Callable[[QColor], None]):
+        self.color_selection.clicked.connect(func)
+
 
 class ModeView(QLabel):
     def __init__(self):
@@ -315,21 +392,22 @@ class MainWindow(QMainWindow):
         save_action = QAction("Save", self)
         open_action = QAction("Open", self)
         self.filename_widget = QLabel(self.filename)
-        self.mode_label = ModeView()
+#        self.mode_label = ModeView()
         self.filename_widget.setStyleSheet('font-size: 16pt;')
-        spacer, spacer_2 = QWidget(), QWidget()
-        expanding_spacer = QWidget()
-        expanding_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        spacer = QWidget()
+#        spacer_2 = QWidget()
+#        expanding_spacer = QWidget()
+#        expanding_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         spacer.setFixedWidth(200)
-        spacer_2.setFixedWidth(50)
+#        spacer_2.setFixedWidth(50)
 
         toolbar.addAction(save_action)
         toolbar.addAction(open_action)
         toolbar.addWidget(spacer)
         toolbar.addWidget(self.filename_widget)
-        toolbar.addWidget(expanding_spacer)
-        toolbar.addWidget(self.mode_label)
-        toolbar.addWidget(spacer_2)
+#        toolbar.addWidget(expanding_spacer)
+#        toolbar.addWidget(self.mode_label)
+#        toolbar.addWidget(spacer_2)
 
         save_action.triggered.connect(self.save_as_svg)
         open_action.triggered.connect(self._load_from_selection)
@@ -345,6 +423,7 @@ class MainWindow(QMainWindow):
         scroll_layout.addWidget(self.graphics_view)
         self.scroll_area = ZoomableScrollArea(scroll_widget)
         self.scroll_area.setWidget(scroll_widget)
+
 
     def _configure_widgets(self):
         self.toggle_menu.hide()
@@ -370,13 +449,13 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(self.toggle_menu)
 
     def setController(self, controller: DrawingController):
-        """ Design needs to be re thought.... entire gui """
+        """ set controller object and connect relevant signals """
         controller.setSceneView(self.graphics_view)
         self.graphics_view.setController(controller)
         self.tool_bar.connectClickedTool(controller.setHandlerFromName)
         self.tool_bar.connectClickedPenWidth(controller.setPenWidth)
-        if self.scene:
-            controller.add_shortcut_listener(self.mode_label)
+        self.tool_bar.connectColorSelection(controller.setPenColor)
+        self.tool_bar.connectColorSelection(controller.setFill)
 
     @property
     def scene(self):
@@ -411,10 +490,16 @@ class MainWindow(QMainWindow):
             return
 
         if isinstance(event, ShortcutCloseEvent):
+            # allow for some default directory? maybe in QApplication([sys.argv])
             home_dir = Path().home()
             num, attempts = 0, 0
             while (home_dir / f"veditor_unamed_{num}").is_file() and attempts < 30:
                 num += 1
+            # figure out a better way of doing this
+            if attempts == 30:
+                event.ignore()
+                return
+
             self.filepath = str(home_dir / f"veditor_unamed{num}")
             self.save()
             return
@@ -468,7 +553,7 @@ class MainWindow(QMainWindow):
         else:
             signal = None
             handler = None
-        selectable_item = SelectableRectItem(svg_item, Handlers.Selector.value,signal)
+        selectable_item = SelectableRectItem(svg_item, signal)
         selectable_item.setScale(scale) # TODO determine scale based on width relative to window width, height width
         self._scene.addItem(selectable_item)
         # hack to 'refresh' signals.. without this loaded graphic won't be selectable untill selector button is pressed again
@@ -483,5 +568,5 @@ class MainWindow(QMainWindow):
             self.resize(self.width() + self.toggle_menu.width(), self.height())
             self.toggle_menu.show()
 
-    def modeView(self):
-        return self.mode_label
+#    def modeView(self):
+#        return self.mode_label
