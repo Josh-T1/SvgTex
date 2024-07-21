@@ -1,21 +1,41 @@
 from collections.abc import Callable
-from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QColor, QGuiApplication, QIcon, QKeyEvent, QMouseEvent, QPen, QPainter, QPixmap, QTransform
-from PyQt6.QtCore import QByteArray, QPointF, QRect, Qt, QRectF, pyqtSignal, QEvent, QSize
+from copy import deepcopy
+from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QColor, QCursor, QGuiApplication, QIcon, QKeyEvent, QKeySequence, QMouseEvent, QPen, QPainter, QPixmap, QTransform
+from PyQt6.QtCore import QByteArray, QKeyCombination, QPointF, QRect, Qt, QRectF, pyqtSignal, QEvent, QSize
 from PyQt6.QtSvg import QSvgGenerator, QSvgRenderer
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel, QMessageBox, QPinchGesture, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
-                             QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem)
+                             QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem, QGraphicsRectItem)
 from ..drawing.tools import NullDrawingHandler, Textbox
 from ..control.drawing_controller import DrawingController
 from .graphics_items import SelectableRectItem, Textbox
 from pathlib import Path
+from functools import partial
+from collections import deque
 import logging
-from ..control.shortcut_manager import ShortcutCloseEvent, ShortcutManager
+from ..control.shortcut_manager import Shortcut, ShortcutCloseEvent, ShortcutManager
 from ..utils import tex2svg, text_is_latex, Handlers
 logger = logging.getLogger(__name__)
 
 UNSAVED_NAME = "No Name **"
 MEDIA_PATH = Path(__file__).parent.parent / "media"
+
+class PngCheckBox(QWidget):
+    def __init__(self, path: str):
+        super().__init__()
+        self._layout = QVBoxLayout()
+        self.path = path
+        self.initUi()
+        self.setLayout(self._layout)
+
+    def initUi(self):
+        self._create_widgets()
+        self.checkbox.setIconSize(QSize(30, 30))
+
+    def _create_widgets(self):
+        self.checkbox = QCheckBox()
+        custom_icon = QIcon(self.path)
+        self.checkbox.setIcon(custom_icon)
 
 class ToggleMenuWidget(QWidget):
     def __init__(self):
@@ -36,19 +56,14 @@ class ToggleMenuWidget(QWidget):
 
 
 class GraphicsView(QGraphicsView):
-    def __init__(self, controller: None | DrawingController = None, shortcut_manager: None | ShortcutManager = None):
+    def __init__(self, controller: None | DrawingController = None):
         super().__init__()
         self._controller =  controller
-        self.shortcut_manager = shortcut_manager
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     def setShortcutManager(self, shortcut_manager: ShortcutManager):
         self.shortcut_manager = shortcut_manager
 
-    def keyPressEvent(self, event):
-        if self._controller and event:
-            self._controller.keyPressEvent(event)
-        super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
         if self._controller and event:
@@ -108,10 +123,59 @@ class ZoomableScrollArea(QScrollArea):
         return super().event(event)
 
 class TexGraphicsScene(QGraphicsScene):
-    def __init__(self):
+    def __init__(self, cache_max = 100):
         super().__init__()
+        self.cache = deque()
+        self.cache_max = cache_max
+        self.clipboard_item: QGraphicsItem | None = None
+
+    def copy_to_clipboard(self):
+        for item in self.selectedItems():
+            if hasattr(item, "__deepcopy__") and isinstance(item, SelectableRectItem):
+                self.clipboard_item = deepcopy(item)
+                return
+
+    def paste_from_clipboard(self, pos: QPointF):
+        if self.clipboard_item:
+            self.addItem(self.clipboard_item)
+            offset = pos - self.clipboard_item.mapToScene(self.clipboard_item.boundingRect().topLeft())
+            self.clipboard_item.setPos(self.clipboard_item.scenePos() + offset)
+#            text = SelectableRectItem(Textbox(QRectF(0, 0, 100, 100)), select_signal=self.clipboard_item.select_signal)
+#            self.addItem(text)
+            self.clipboard_item = None
+
+    def keyPressEvent(self, event: QKeyEvent | None):
+        if event is None:
+            return
+
+        event_sequence = QKeySequence(QKeyCombination(event.modifiers(), Qt.Key(event.key())))
+#        Qt.KeyboardModifier.ShiftModifier.value
+        if QKeySequence(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_U)).matches(event_sequence) == QKeySequence.SequenceMatch.ExactMatch:
+            if len(self.cache) != 0:
+                item = self.cache.pop()
+                self.addItem(item)
+
+        elif QKeySequence(QKeyCombination(Qt.KeyboardModifier.NoModifier, Qt.Key.Key_Backspace)).matches(event_sequence) == QKeySequence.SequenceMatch.ExactMatch: #== QKeySequence.SequenceMatch.ExactMatch:
+            focus_item = self.focusItem()
+            if not isinstance(focus_item, QGraphicsTextItem):
+                selected_items = self.selectedItems()
+                for item in selected_items:
+                    if isinstance(item, SelectableRectItem):
+                        self.removeItem(item)
+                        self.add_to_cache(item)
+                        del SelectableRectItem.selectableItems[item._id]
+
+
+        super().keyPressEvent(event)
+
+    def add_to_cache(self, item: QGraphicsItem):
+        if len(self.cache) > self.cache_max:
+            self.cache.popleft()
+        self.cache.append(item)
 
     def compile_latex(self):
+        # TODO
+        print("attempting to compile")
         for item in self.items():
             parent = item.parentItem()
             if not isinstance(item, Textbox) or not isinstance(parent, SelectableRectItem):
@@ -329,19 +393,20 @@ class VToolBar(QWidget):
     def _create_widgets(self):
         selector_box = QCheckBox("Selector")
         selector_box.setChecked(True)
-        self.tool_checkbox = SingleCheckBox(QCheckBox(Handlers.Freehand.name),
-                                            QCheckBox(Handlers.Line.name),
-                                            QCheckBox(Handlers.Textbox.name),
-                                            QCheckBox(Handlers.Rect.name),
-                                            QCheckBox(Handlers.Ellipse.name),
-                                            QCheckBox(Handlers.Fill.name),
-                                            selector_box,
-                                            fallback = selector_box.text())
+        self.check_boxes = [QCheckBox(str(Handlers.Freehand.name)),
+                            QCheckBox(str(Handlers.Line.name)),
+                            QCheckBox(str(Handlers.Textbox.name)),
+                            QCheckBox(str(Handlers.Rect.name)),
+                            QCheckBox(str(Handlers.Ellipse.name)),
+                            QCheckBox(str(Handlers.Fill.name)),
+                            selector_box]
+        self.tool_checkbox = SingleCheckBox(*self.check_boxes, fallback = selector_box.text())
         self.pen_size_selector_label = QLabel("Pen Width")
         self.pen_size_selector = IntBox()
         self.toggle_menu_button = QPushButton("Toggle Menu")
         self.color_selection = ColorBar()
         self.fill_color_selection = ColorBar()
+        self.selection_toggle = QCheckBox("Disable Selection")
 
     def _configure_widgets(self):
         button = QPushButton()
@@ -364,6 +429,8 @@ class VToolBar(QWidget):
         self.toolbar_layout.addWidget(self.color_selection)
         self.toolbar_layout.addWidget(QLabel("Fill Color"))
         self.toolbar_layout.addWidget(self.fill_color_selection)
+        self.toolbar_layout.addWidget(self.selection_toggle)
+
     def connectClickedTool(self, func: Callable):
         self.tool_checkbox.clicked.connect(func)
 
@@ -379,6 +446,16 @@ class VToolBar(QWidget):
     def connectFillColorSelection(self, func: Callable[[QColor], None]):
         self.fill_color_selection.clicked.connect(func)
 
+    def connectToggleSelection(self, func: Callable[[QColor], None]):
+        self.selection_toggle.clicked.connect(func)
+
+    def getClickCallback(self, box_text: str):
+        for box in self.check_boxes:
+            if box.text() == box_text and not box.isChecked():
+                return box.click
+        return None
+
+
 class MainWindow(QMainWindow):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -386,6 +463,10 @@ class MainWindow(QMainWindow):
         self.scene_default_width = 1052 * 0.75
         self.scene_default_height = 744 * 0.75
         self.initUi()
+
+        shortcuts = self.set_default_shortcuts()
+        for shortcut in shortcuts:
+            self.add_shortcut(*shortcut[:-1], **shortcut[-1])
 
     @property
     def filepath(self):
@@ -460,6 +541,8 @@ class MainWindow(QMainWindow):
         self._scene.setSceneRect(QRectF(0, 0, self.scene_default_width, self.scene_default_height)) # TODO
         self.scroll_area.setWidgetResizable(True)
 
+        self.tool_bar.connectToggleSelection(SelectableRectItem.toggleEnabled)
+
     def _add_widgets(self):
         self.main_layout.addWidget(self.scroll_area)
         self.main_layout.addWidget(self.tool_bar)
@@ -473,6 +556,7 @@ class MainWindow(QMainWindow):
         self.tool_bar.connectClickedPenWidth(controller.setPenWidth)
         self.tool_bar.connectColorSelection(controller.setPenColor)
         self.tool_bar.connectFillColorSelection(controller.setFill)
+
 
     @property
     def scene(self):
@@ -584,3 +668,35 @@ class MainWindow(QMainWindow):
         else:
             self.resize(self.width() + self.toggle_menu.width(), self.height())
             self.toggle_menu.show()
+
+    def add_shortcut(self, key: Qt.Key, callback, name, modifiers=Qt.KeyboardModifier.NoModifier):
+        action = QAction(name, self)
+        action.setShortcut(QKeySequence(QKeyCombination(modifiers, key)))
+        action.triggered.connect(callback)
+        self.addAction(action)
+
+    def get_cursor_pos(self) -> QPointF:
+        global_pos = QCursor().pos()
+        view_pos = self.graphics_view.mapFromGlobal(global_pos)
+        scene_pos = self.graphics_view.mapToScene(view_pos)
+        return QPointF(scene_pos.x(), scene_pos.y())
+
+    def set_default_shortcuts(self):
+        def call_click(button_name):
+            func = self.tool_bar.getClickCallback(button_name)
+            if callable(func):
+                func()
+            return
+        shortcuts = [
+                (Qt.Key.Key_F, lambda: call_click(str(Handlers.Freehand.name)), "Freehand", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
+                (Qt.Key.Key_L, lambda: call_click(str(Handlers.Line.name)), "Line", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
+                (Qt.Key.Key_T, lambda: call_click(str(Handlers.Textbox.name)), "Textbox", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
+                (Qt.Key.Key_R, lambda: call_click(str(Handlers.Rect.name)), "Rect", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
+                (Qt.Key.Key_P, lambda: call_click(str(Handlers.Fill.name)), "Pain", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
+                (Qt.Key.Key_S, lambda: call_click(str(Handlers.Selector.name)), "Selector", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
+                (Qt.Key.Key_C, lambda: self._scene.compile_latex(), "Compile latex", {"modifiers": Qt.KeyboardModifier.ShiftModifier}),
+                (Qt.Key.Key_N, lambda: SelectableRectItem.cycle(self.get_cursor_pos()), "Cycle selectable items under curosr", {"modifiers": Qt.KeyboardModifier.MetaModifier}),
+                (Qt.Key.Key_C, self._scene.copy_to_clipboard, "Copy item", {"modifiers": Qt.KeyboardModifier.ControlModifier}),
+                (Qt.Key.Key_V, lambda: self._scene.paste_from_clipboard(self.get_cursor_pos()), "Paste item", {"modifiers": Qt.KeyboardModifier.ControlModifier}),
+                ]
+        return shortcuts

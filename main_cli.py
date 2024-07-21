@@ -1,5 +1,6 @@
 import argparse as arg
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
 import sys
 from .utils import load_shortcuts
 from .graphics.window import MainWindow
@@ -23,12 +24,14 @@ def main():
 
     app = QApplication([])
     window = MainWindow()
+    window.add_shortcut(Qt.Key.Key_T, lambda: print("hello"), "teset" )
     cont = DrawingController()
     # remove scene probably
     shortcut_manager = ShortcutManager(window._scene, window.closeEvent)
-#    shortcuts_module = lazy_import(config["user-shortcuts-path"])
+#    shortcuts_module = lazy_import("user_shortcuts", config["user-shortcuts-path"], "VectorGraphics.shortcuts")
 #    print(shortcuts_module, "m")
 #    if shortcuts_module:
+#        print("successfully loaded")
 #        shortcuts = load_shortcuts(shortcuts_module)
 #        shortcut_manager.add_shortcut(shortcuts)
 
@@ -36,10 +39,9 @@ def main():
     cont.setHandler(handler)
     cont.setShortcutManager(shortcut_manager)
     window.setController(cont)
-    file = args.file
-
-    if file and str(file[0]).endswith(".svg") and Path(file[0]).is_file():
-        window.open_with_svg(file[0])
+    file_args = args.file
+    if file_args and str(file_args[0]).endswith(".svg") and Path(file_args[0]).is_file():
+        window.open_with_svg(file_args[0])
 
     window.show()
     sys.exit(app.exec())

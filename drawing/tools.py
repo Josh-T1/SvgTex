@@ -4,7 +4,7 @@ from PyQt6.QtGui import QBrush, QKeyEvent, QMouseEvent, QPen, QPainterPath
 from PyQt6.QtCore import QObject, QPointF, Qt, pyqtBoundSignal, pyqtSignal,  QRectF
 from PyQt6.QtWidgets import (QGraphicsEllipseItem, QGraphicsItem, QGraphicsPathItem, QGraphicsRectItem, QGraphicsView, QGraphicsScene, QGraphicsLineItem)
 
-from ..graphics.graphics_items import SelectableRectItem, Textbox
+from ..graphics.graphics_items import DeepCopyableEllipseItem, DeepCopyableLineItem, DeepCopyableRectItem, SelectableRectItem, Textbox
 
 
 
@@ -22,6 +22,14 @@ class DrawingHandler(ABC):
     @abstractmethod
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         pass
+    def max_z_value(self, scene: QGraphicsScene):
+        max_val = 0
+        for item in scene.items():
+            if not isinstance(item, QGraphicsItem):
+                continue
+            if (item_z_val:= item.zValue()) > max_val:
+                max_val = item_z_val
+        return max_val
 
 class PaintHandler(ABC):
     @abstractmethod
@@ -86,8 +94,10 @@ class TextboxDrawingHandler(DrawingHandler):
             rect = QRectF(start_point, bottom_right)
             if not self.selectable_rect_item or not self.rect_item:
                 self.rect_item = Textbox(rect)
+                self.rect_item.moving = True
                 self.selectable_rect_item = SelectableRectItem(self.rect_item, self.handler_signal)
                 scene.addItem(self.selectable_rect_item)
+                self.selectable_rect_item.setZValue(self.max_z_value(scene))
             else:
                 self.rect_item.setRect(rect)
 
@@ -121,6 +131,7 @@ class LineDrawingHandler(DrawingHandler):
             self.current_line.setLine(self.start_point.x(), self.start_point.y(), end_point.x(), end_point.y())
             selectable_line = SelectableRectItem(self.current_line, self.handler_signal)
             scene.addItem(selectable_line)
+            selectable_line.setZValue(self.max_z_value(scene))
             self.start_point = None
             self.current_line = None
 
@@ -132,7 +143,7 @@ class LineDrawingHandler(DrawingHandler):
     def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         if event.button() == Qt.MouseButton.LeftButton:
             self.start_point = view.mapToScene(event.position().toPoint())
-            self.current_line = QGraphicsLineItem()
+            self.current_line = DeepCopyableLineItem()
             self.current_line.setPen(pen)
             scene = view.scene()
             if scene:
@@ -140,9 +151,9 @@ class LineDrawingHandler(DrawingHandler):
 
 class ShapeDrawingHandler(DrawingHandler):
     """ Tool for drawing rectangles """
-    def __init__(self, handler_signal: pyqtBoundSignal, shape: Callable[[QRectF], QGraphicsRectItem | QGraphicsEllipseItem]) -> None:
+    def __init__(self, handler_signal: pyqtBoundSignal, shape: Callable[[QRectF], DeepCopyableRectItem | DeepCopyableEllipseItem]) -> None:
         super().__init__(handler_signal)
-        self.shape: Callable[[QRectF], QGraphicsRectItem | QGraphicsEllipseItem] = shape
+        self.shape: Callable[[QRectF], DeepCopyableEllipseItem | DeepCopyableRectItem] = shape
         self.tmp_scene_item = None
         self.drawing_started = False
         self.start_point: None | QPointF = None
@@ -172,6 +183,7 @@ class ShapeDrawingHandler(DrawingHandler):
                 self.tmp_scene_item = self.shape(rect)
                 self.tmp_scene_item.setPen(pen)
                 scene.addItem(self.tmp_scene_item)
+                self.tmp_scene_item.setZValue(self.max_z_value(scene))
             else:
                 event_pos = view.mapToScene(event.position().toPoint())
                 rect = self._get_rect(self.start_point, event_pos)
@@ -181,17 +193,18 @@ class ShapeDrawingHandler(DrawingHandler):
         scene = view.scene()
         if scene is not None and self.tmp_scene_item:
             scene.removeItem(self.tmp_scene_item)
-            scene.addItem(SelectableRectItem(self.tmp_scene_item, self.handler_signal))
+            selectable_rect = SelectableRectItem(self.tmp_scene_item, self.handler_signal)
+            scene.addItem(selectable_rect)
             self.drawing_started = False
             self.tmp_scene_item = None
 
 class RectDrawingHandler(ShapeDrawingHandler):
     def __init__(self, handler_signal):
-        super().__init__(handler_signal, QGraphicsRectItem)
+        super().__init__(handler_signal, DeepCopyableRectItem)
 
 class EllipseDrawingHandler(ShapeDrawingHandler):
     def __init__(self, handler_signal):
-        super().__init__(handler_signal, QGraphicsEllipseItem)
+        super().__init__(handler_signal, DeepCopyableEllipseItem)
 
 class BelzierDrawingHandler(DrawingHandler):
     def __init__(self, handler_signal: pyqtBoundSignal):
@@ -244,6 +257,7 @@ class FreeHandDrawingHandler(DrawingHandler):
             self.current_path_item = QGraphicsPathItem(self.current_path)
             self.current_path_item.setPen(pen)
             scene.addItem(self.current_path_item)
+            self.current_path_item.setZValue(self.max_z_value(scene))
 
     def inBounds(self, scene: QGraphicsScene, event: QMouseEvent) -> bool:
         """ Returns true if event took place within the bounds of scene """

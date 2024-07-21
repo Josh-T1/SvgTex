@@ -40,10 +40,6 @@ class DrawingController(QObject):
                                           }
 
 
-    def keyPressEvent(self, event: QKeyEvent):
-        if self.shortcut_manager:
-            self.shortcut_manager.keyPress(event)
-
     def mousePressEvent(self, event: QMouseEvent):
         if self.handler and self.scene_view and self.pen:
             if isinstance(self.handler, DrawingHandler):

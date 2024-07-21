@@ -5,6 +5,8 @@ from PyQt6.QtWidgets import QApplication, QGraphicsItem, QGraphicsScene, QGraphi
 from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from ..utils import KeyCodes, Handlers
 import logging
+import functools
+from ..graphics.graphics_items import SelectableRectItem
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +75,11 @@ class ShortcutManager:
         shortcuts = [
 #                Shortcut(KeyCodes.Key_i, self.insert_mode, Modes.Normal, name="set insert mode", builtin=True),
 #                Shortcut(KeyCodes.Key_esc, self.normal_mode, Modes.Insert, name="set normal mode", builtin=True),
-                Shortcut(KeyCodes.Key_Delete, self.delete_from_scene, name="delete from scene", builtin=True),
-                Shortcut(KeyCodes.Key_u, self.add_from_cache, name="Undo delete", modifiers=Qt.KeyboardModifier.ShiftModifier, builtin=True),
-                Shortcut(KeyCodes.Key_c, self._close_callback, name="Close Application", modifiers=Qt.KeyboardModifier.ControlModifier, builtin=True),
-                Shortcut(KeyCodes.Key_c, self.compile_tex, name="Compile embeded latex", modifiers=Qt.KeyboardModifier.ShiftModifier, builtin=True),
+#                Shortcut(KeyCodes.Key_Delete, self.delete_from_scene, name="delete from scene", builtin=True),
+#                Shortcut(KeyCodes.Key_u, self.add_from_cache, name="Undo delete", modifiers=Qt.KeyboardModifier.ShiftModifier, builtin=True),
+#                Shortcut(KeyCodes.Key_c, self._close_callback, name="Close Application", modifiers=Qt.KeyboardModifier.ControlModifier, builtin=True),
+#                Shortcut(KeyCodes.Key_c, self.compile_tex, name="Compile embeded latex", modifiers=Qt.KeyboardModifier.ShiftModifier, builtin=True),
+#                Shortcut(KeyCodes.Key_n, SelectableRectItem.cycle, name="Cycle selection", modifiers=Qt.KeyboardModifier.ShiftModifier, builtin=True)
 #                Shortcut(KeyCodes.Key_f, lambda: self.controller.setFromName(Handlers.Freehand.value), name="Set freehand tool", modifiers=Qt.KeyboardModifier.ShiftModifier, builtin=True),
 #                Shortcut(KeyCodes.Key_l, lambda: self.controller.setFromName(Handlers.Line.value), name="Set freehand tool", modifiers=Qt.KeyboardModifier.ShiftModifier, builtin=True),
 #                Shortcut(KeyCodes.Key_t, lambda: self.controller.setFromName(Handlers.Textbox.value), name="Set freehand tool", modifiers=Qt.KeyboardModifier.ShiftModifier, builtin=True),
@@ -85,11 +88,12 @@ class ShortcutManager:
         self.add_shortcut(shortcuts)
 
     def add_shortcut(self, shortcut: Shortcut | list[Shortcut]):
-        if isinstance(shortcut, Shortcut):
-            shortcut.callback = shortcut.callback if shortcut.builtin else lambda: shortcut.callback(self)
-            self.shortcuts.append(shortcut)
-        else:
-            self.shortcuts.extend(shortcut)
+        shortcuts = [shortcut] if isinstance(shortcut, Shortcut) else shortcut
+        for sc in shortcuts:
+            if not sc.builtin:
+                sc.callback = functools.partial(sc.callback, self)
+
+            self.shortcuts.append(sc)
 
     def delete_from_scene(self):
         focus_item = self.scene.focusItem()
