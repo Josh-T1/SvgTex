@@ -8,12 +8,13 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QFileDialog,
                              QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem, QGraphicsRectItem)
 from ..drawing.tools import NullDrawingHandler, Textbox
 from ..control.drawing_controller import DrawingController
-from .graphics_items import SelectableRectItem, Textbox
+from .graphics_items import DeepCopyableSvgItem, SelectableRectItem, StoringQSvgRenderer, Textbox
 from pathlib import Path
 from functools import partial
 from collections import deque
 import logging
 from ..control.shortcut_manager import Shortcut, ShortcutCloseEvent, ShortcutManager
+from ..loading.load_svg import scene_to_svg as scene_to_svg_test, SvgGraphicsFactory
 from ..utils import tex2svg, text_is_latex, Handlers
 logger = logging.getLogger(__name__)
 
@@ -199,8 +200,8 @@ class TexGraphicsScene(QGraphicsScene):
         if not svg_bytes:
             return
         svg_data = QByteArray(svg_bytes.read())
-        renderer = QSvgRenderer(svg_data)
-        item = QGraphicsSvgItem()
+        renderer = StoringQSvgRenderer(svg_data)
+        item = DeepCopyableSvgItem(renderer)
         item.setSharedRenderer(renderer)
         return item
 
@@ -572,16 +573,18 @@ class MainWindow(QMainWindow):
         """ Return 0 if not error else 1
         TODO: Re write this"""
         viewport = self.graphics_view.viewport()
-        if file_path is None or viewport is None:
-            logger.error(f"Invalid file_path: {file_path}")
-            return 1
-        svg_gen = QSvgGenerator()
-        svg_gen.setFileName(file_path)
-        svg_gen.setSize(viewport.size())
-        svg_gen.setViewBox(self.graphics_view.sceneRect())
-        painter = QPainter(svg_gen)
-        self._scene.render(painter)
-        painter.end()
+        if viewport is None: return
+#        if file_path is None or viewport is None:
+#            logger.error(f"Invalid file_path: {file_path}")
+#            return 1
+#        svg_gen = QSvgGenerator()
+#        svg_gen.setFileName(file_path)
+#        svg_gen.setSize(viewport.size())
+#        svg_gen.setViewBox(self.graphics_view.sceneRect())
+#        painter = QPainter(svg_gen)
+#        self._scene.render(painter)
+#        painter.end()
+        scene_to_svg_test(self._scene, file_path)
         return 0
 
     def closeEvent(self, event: QCloseEvent): #type: ignore
@@ -637,6 +640,10 @@ class MainWindow(QMainWindow):
         """ Save svg """
         self.scene_to_svg(self._filepath)
 
+    def build_svg(self):
+        builder = SvgGraphicsFactory(self._scene)
+        builder.build(self._filepath)
+
     def open_with_svg(self, filepath: str):
         """ Loads svg and sets filename to svg name. Implements 'editing' functionality, the original svg will
         overidden when saved"""
@@ -645,7 +652,7 @@ class MainWindow(QMainWindow):
 
     def load_svg(self, file_path: str, scale=0.5):
         """ TODO """
-        svg_item = QGraphicsSvgItem(file_path)
+        svg_item = DeepCopyableSvgItem(file_path)
         svg_item.setFlag(QGraphicsSvgItem.GraphicsItemFlag.ItemClipsToShape, True) # Make background transparent
         cont = self.graphics_view.controller()
         if cont:
@@ -654,8 +661,8 @@ class MainWindow(QMainWindow):
         else:
             signal = None
             handler = None
-        selectable_item = SelectableRectItem(svg_item, signal)
-        selectable_item.setScale(scale) # TODO determine scale based on width relative to window width, height width
+        selectable_item = SelectableRectItem(svg_item, signal) # TODO
+        #selectable_item.setScale(scale) # TODO determine scale based on width relative to window width, height width
         self._scene.addItem(selectable_item)
         # hack to 'refresh' signals.. without this loaded graphic won't be selectable untill selector button is pressed again
         if handler and signal:
