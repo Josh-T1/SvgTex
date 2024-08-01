@@ -83,8 +83,14 @@ class SvgGraphicsFactory:
         ellipse_item = QGraphicsEllipseItem(x, y, cx, cy)
         if fill is not None:
             ellipse_item.setBrush(QBrush(QColor(fill)))
+        if parent_transform:
+            ellipse_item.setTransform(parent_transform)
+        if transform is not None:
+            ellipse_item.setTransform(transform)
         if stroke is not None:
             ellipse_item.setPen(QPen(QColor(stroke)))
+        if fill is not None:
+            ellipse_item.setBrush(QBrush(QColor(fill)))
         return ellipse_item
 
     def build_rect(self, element: ET.Element, parent_transform=None):
@@ -101,7 +107,7 @@ class SvgGraphicsFactory:
 
         if parent_transform is not None:
             rect_item.setTransform(parent_transform, True)
-        if transform:
+        if transform is not None:
             rect_item.setTransform(transform)
 
         if fill is not None:

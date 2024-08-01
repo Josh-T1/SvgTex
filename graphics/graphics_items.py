@@ -11,6 +11,44 @@ from ..utils import KeyCodes, Handlers
 from collections import OrderedDict
 from copy import deepcopy
 from abc import ABC, abstractmethod
+import re
+from lxml import etree
+
+def translate_path(svg_document: bytes, x_shift: float, y_shift: float) -> str:
+    """
+    TODO: This should be possible using the builtin xml.etree instead of lxml.etree
+    """
+    svg_namespace = {'svg': 'http://www.w3.org/2000/svg'}
+    root = etree.fromstring(svg_document)
+
+    for g in root.findall('.//svg:g', namespaces=svg_namespace):
+        paths = g.xpath('.//svg:path', namespaces=svg_namespace)
+        if len(paths) != 0:
+
+            g_transform_attrib = g.attrib.get("transform")
+            if g_transform_attrib:
+                transform_pattern = r'\b[a-zA-Z_]\w*\s*\([^)]*\)' # TODO determine limitation of this regex pattern
+
+                matches = re.findall(transform_pattern, g_transform_attrib)
+                new_transform = ""
+                for match in matches:
+                    if match.startswith("translate"):
+                        translate_pattern = r'translate\((-?\d+(\.\d+)?) \s*(-?\d+(\.\d+)?)\)'
+                        translate_match = re.match(translate_pattern, g_transform_attrib)
+                        if not translate_match: # This should be impossible
+                            continue
+
+                        x_translate = float(translate_match.group(1)) + x_shift
+                        y_translate = float(translate_match.group(2)) + y_shift
+                        new_translate = f"translate({x_translate} {y_translate})"
+                        new_transform += new_translate
+                    else:
+                        new_transform += match
+
+                g.set("transform", new_transform)
+
+    tree = etree.ElementTree(root)
+    return etree.tostring(tree).decode('utf-8')
 
 def color_to_rgb(color: QColor):
     return f'rgb({color.red()}, {color.green()}, {color.blue()})'
@@ -149,21 +187,24 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
         elif isinstance(data, StoringQSvgRenderer):
             super().__init__()
             self.setSharedRenderer(data)
-            print("BODY")
-            print(self.svg_body())
         else:
             super().__init__()
-        self.svg_data = None
 
+    # make property
     def svg_body(self):
         if not self.svg_data:
             return ""
-        start = self.svg_data.find("<svg")
-        end = self.svg_data.rfind("</svg>")
-        print(start, end)
-        if start == -1 or end == -1: # should accessing a property lead
+        # Translate svg item to reflect its scene position instead of relative position
+        svg_doc = translate_path(self.svg_data.encode('utf-8'), self.transform().dx(), self.transform().dy())
+        start = svg_doc.find("<svg")
+        end = svg_doc.rfind("</svg>")
+
+        if start == -1 or end == -1:
             raise ValueError("Invalid Svg format: no <svg> tags found")
-        return self.svg_data[start: end].replace("<svg>", '<g id="imported_svg">').replace("</svg>", "</g>")
+        # remove svg tags
+        body = re.sub(r'<svg\s+([^>]*)/?>', '', svg_doc[start:end])
+        body = body.replace("</svg>", "")
+        return body
 
     def setSharedRenderer(self, renderer: StoringQSvgRenderer): # type: ignore
         super().setSharedRenderer(renderer)
@@ -176,13 +217,13 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
     def __deepcopy__(self, memo) -> Any:
         if not self.svg_data:
             return DeepCopyableSvgItem()
-        data = QByteArray(bytes(self.svg_data, 'utf-8'))
+        data = QByteArray(self.svg_data.encode('utf-8'))
         renderer = StoringQSvgRenderer(data)
-        return DeepCopyableSvgItem(renderer)
+        svg_item = DeepCopyableSvgItem(renderer)
+        svg_item.setTransform(self.transform())
+        return svg_item
 
     def to_svg(self):
-        print("YES")
-        print(self.svg_body())
         return self.svg_body()
 
 class DeepCopyableEllipseItem(QGraphicsEllipseItem, DeepCopyableGraphicsItem):
@@ -207,16 +248,16 @@ class DeepCopyableEllipseItem(QGraphicsEllipseItem, DeepCopyableGraphicsItem):
         pen_svg = self.pen_to_svg(self.pen())
         brush_svg = self.brush_to_svg(self.brush())
         transform_svg = self.transform_to_svg(self.transform())
-        item_svg = f'<ellipse cx="{self.rect().center().x()}" y="{self.rect().center().y()}" width="{self.rect().width()}" height="{self.rect().height()}" style="{pen_svg}";"{brush_svg}"/>'
+        item_svg = f'<ellipse cx="{self.rect().center().x()}" cy="{self.rect().center().y()}" rx="{self.rect().width() / 2}" ry="{self.rect().height() / 2}" style="{pen_svg};{brush_svg}"'
         item_svg += f' data-custom-type="DeepCopyableEllipseItem"/>'
         for child in self.childItems():
             if hasattr(child, "to_svg"):
                 child_to_svg = getattr(child, 'to_svg')
                 item_svg += "   " + child_to_svg()
 
-        return (f'<g transform="{transform_svg}">'
-                f'{item_svg}'
-                f'</g>')
+        return (f'<g transform="{transform_svg}">\n'
+                f'{item_svg}\n'
+                f'</g>\n')
 
 class DeepCopyableRectItem(QGraphicsRectItem, DeepCopyableGraphicsItem):
     def __init__(self, *args, **kwargs):
@@ -235,9 +276,9 @@ class DeepCopyableRectItem(QGraphicsRectItem, DeepCopyableGraphicsItem):
                 child_to_svg = getattr(child, 'to_svg')
                 item_svg += "   " + child_to_svg()
 
-        return (f'<g transform="{transform_svg}">'
-                f'{item_svg}'
-                f'</g>')
+        return (f'<g transform="{transform_svg}">\n'
+                f'{item_svg}\n'
+                f'</g>\n')
 
     def __deepcopy__(self, memo):
         new_item = DeepCopyableRectItem(self.rect(), self.parentItem())
@@ -282,9 +323,9 @@ class DeepCopyableLineItem(QGraphicsLineItem, DeepCopyableGraphicsItem):
                 child_to_svg = getattr(child, 'to_svg')
                 item_svg += "   " + child_to_svg()
 
-        return (f'<g transform="{transform_svg}">'
-                f'{item_svg}'
-                f'</g>')
+        return (f'<g transform="{transform_svg}">\n'
+                f'{item_svg}\n'
+                f'</g>\n')
 
 class SelectableRectItem(QGraphicsItem):
     """ Selectable container for QGraphicsItems's """
@@ -556,7 +597,7 @@ class SelectableRectItem(QGraphicsItem):
 
 
 class ClippedTextItem(QGraphicsTextItem):
-    def __init__(self, text, clip_rect, parent=None):
+    def __init__(self, text: str, clip_rect, parent=None):
         super().__init__(text, parent)
         self.text = text
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditable | Qt.TextInteractionFlag.TextSelectableByMouse
@@ -573,8 +614,7 @@ class ClippedTextItem(QGraphicsTextItem):
         painter.setClipRect(self.clipRect)
         super().paint(painter, option, widget)
 
-    def to_svg(self):
-        pass
+
 
 class Textbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
     default_message = "Text..."
@@ -642,6 +682,7 @@ class Textbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
             self.setRect(new_rect)
 
     def text(self):
+
         return self.text_item.toPlainText()
 
     def __deepcopy__(self, memo) -> Any:
@@ -652,18 +693,22 @@ class Textbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
         return new_item
 
     def to_svg(self):
-        brush_svg = self.brush_to_svg(self.brush())
-        pen_svg = self.pen_to_svg(self.pen())
+        font_item = self.text_item.font()
         transform_svg = self.transform_to_svg(self.transform())
-        item_svg = f'<rect x="{self.rect().x()}" y="{self.rect().y()}" width="{self.rect().width()}" height="{self.rect().height()}"'
-        item_svg += f' style="{pen_svg};{brush_svg}"'
-        item_svg += f'data-custom-type="DeepCopyableRectItem"/>'
+        item_svg = f'<text x="{self.rect().x()}" y="{self.rect().y()}" font-family="{font_item.family()}" font-size="{font_item.pointSize()}" fill="{color_to_rgb(self.text_item.defaultTextColor())}"'
+        item_svg += f' data-custom-type="DeepCopyableRectItem"'
+        item_svg += f' data-custom-params="({self.rect().width()}, {self.rect().height()}, {self.text()})">\n'
+#        item_svg += f' style="{pen_svg};{brush_svg}"'
+        item_svg += f"   {self.text()}\n"
+        item_svg += f'</text>'
+
+
 
         for child in self.childItems():
             if hasattr(child, "to_svg"):
                 child_to_svg = getattr(child, 'to_svg')
                 item_svg += "   " + child_to_svg()
 
-        return (f'<g transform="{transform_svg}">',
-                f'{item_svg}'
-                f'</g>')
+        return (f'<g transform="{transform_svg}">\n'
+                f'{item_svg}\n'
+                f'</g>\n')

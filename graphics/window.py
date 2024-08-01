@@ -14,7 +14,7 @@ from functools import partial
 from collections import deque
 import logging
 from ..control.shortcut_manager import Shortcut, ShortcutCloseEvent, ShortcutManager
-from ..loading.load_svg import scene_to_svg as scene_to_svg_test, SvgGraphicsFactory
+from ..svg.load_svg import scene_to_svg as scene_to_svg_test, SvgGraphicsFactory
 from ..utils import tex2svg, text_is_latex, Handlers
 logger = logging.getLogger(__name__)
 
