@@ -1,6 +1,6 @@
 from pathlib import Path, PureWindowsPath
 from typing import Any, OrderedDict
-from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPen, QPainterPath, QKeyEvent, QTextCursor
+from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPen, QPainterPath, QKeyEvent, QTextCursor, QTransform
 from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt, pyqtBoundSignal, QRectF, QSizeF, QRect
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem
@@ -13,11 +13,80 @@ from copy import deepcopy
 from abc import ABC, abstractmethod
 import re
 from lxml import etree
+import numpy as np
 
-def translate_path(svg_document: bytes, x_shift: float, y_shift: float) -> str:
+def translate_matrix(tx: float, ty: float):
+    return np.array([
+        [1.0, 0.0, tx],
+        [0.0, 1.0, ty],
+        [0.0, 0.0, 1.0]
+    ])
+
+def scale_matrix(sx, sy):
+    return np.array([
+        [sx, 0, 0],
+        [0, sy, 0],
+        [0, 0, 1]
+    ])
+
+def rotate_matrix(angle, cx=0, cy=0):
+    rad = np.radians(angle)
+    cos_a, sin_a = np.cos(rad), np.sin(rad)
+    return np.array([
+        [cos_a, -sin_a, cx - cos_a * cx + sin_a * cy],
+        [sin_a, cos_a, cy - sin_a * cx - cos_a * cy],
+        [0, 0, 1]
+    ])
+
+def skew_x_matrix(angle):
+    return np.array([
+        [1, np.tan(np.radians(angle)), 0],
+        [0, 1, 0],
+        [0, 0, 1]
+    ])
+
+def skew_y_matrix(angle):
+    return np.array([
+        [1, 0, 0],
+        [np.tan(np.radians(angle)), 1, 0],
+        [0, 0, 1]
+    ])
+
+def combine_transforms_from_string(transforms: list[str]):
+    matrix = np.identity(3)
+    for transform in transforms:
+        args = transform.split("(")[1].split(")")[0].split(" ")
+
+        action = transform.split("(")[0] #)
+        if action == "translate":
+            args = [float(arg) for arg in args]
+            matrix = np.dot(matrix, translate_matrix(*args))
+        elif action == "scale":
+            args = [float(arg) for arg in args]
+            matrix = np.dot(matrix, scale_matrix(*args))
+
+        elif action == "rotate":
+            args = [int(arg) for arg in args]
+            matrix = np.dot(matrix, rotate_matrix(*args))
+
+        elif action == "skewX":
+            args = [float(arg) for arg in args]
+            matrix = np.dot(matrix, skew_x_matrix(*args))
+
+        elif action == "skewY":
+            args = [float(arg) for arg in args]
+            matrix = np.dot(matrix, skew_y_matrix(*args))
+
+    return matrix
+
+
+
+
+def translate_path(svg_document: bytes, x_shift: float, y_shift: float, transform: QTransform) -> str:
     """
     TODO: This should be possible using the builtin xml.etree instead of lxml.etree
     """
+    transform_np = np.array([[transform.m11(), transform.m12(), transform.dx()], [transform.m21(), transform.m22(), transform.dy()], [0, 0, 1]])
     svg_namespace = {'svg': 'http://www.w3.org/2000/svg'}
     root = etree.fromstring(svg_document)
 
@@ -27,26 +96,14 @@ def translate_path(svg_document: bytes, x_shift: float, y_shift: float) -> str:
 
             g_transform_attrib = g.attrib.get("transform")
             if g_transform_attrib:
-                transform_pattern = r'\b[a-zA-Z_]\w*\s*\([^)]*\)' # TODO determine limitation of this regex pattern
+                transform_pattern = r'\b[a-zA-Z_]\w*\s*\([^)]*\)' # TODO determine limitation of this regex pattern chatgpt provided...
 
                 matches = re.findall(transform_pattern, g_transform_attrib)
-                new_transform = ""
-                for match in matches:
-                    if match.startswith("translate"):
-                        translate_pattern = r'translate\((-?\d+(\.\d+)?) \s*(-?\d+(\.\d+)?)\)'
-                        translate_match = re.match(translate_pattern, g_transform_attrib)
-                        if not translate_match: # This should be impossible
-                            continue
-
-                        x_translate = float(translate_match.group(1)) + x_shift
-                        y_translate = float(translate_match.group(2)) + y_shift
-                        new_translate = f"translate({x_translate} {y_translate})"
-                        new_transform += new_translate
-                    else:
-                        new_transform += match
+                matrix = combine_transforms_from_string(reversed(matches))
+                matrix = np.dot(transform_np, matrix)
+                new_transform = f'''matrix({matrix[0][0]:.6f} {matrix[0][1]:.6f} {matrix[1][0]:.6f} {matrix[1][1]:.6f} {matrix[0][2]:.6f} {matrix[1][2]:.6f})'''
 
                 g.set("transform", new_transform)
-
     tree = etree.ElementTree(root)
     return etree.tostring(tree).decode('utf-8')
 
@@ -195,7 +252,7 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
         if not self.svg_data:
             return ""
         # Translate svg item to reflect its scene position instead of relative position
-        svg_doc = translate_path(self.svg_data.encode('utf-8'), self.transform().dx(), self.transform().dy())
+        svg_doc = translate_path(self.svg_data.encode('utf-8'), self.transform().dx(), self.transform().dy(), self.transform())
         start = svg_doc.find("<svg")
         end = svg_doc.rfind("</svg>")
 

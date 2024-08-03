@@ -574,16 +574,6 @@ class MainWindow(QMainWindow):
         TODO: Re write this"""
         viewport = self.graphics_view.viewport()
         if viewport is None: return
-#        if file_path is None or viewport is None:
-#            logger.error(f"Invalid file_path: {file_path}")
-#            return 1
-#        svg_gen = QSvgGenerator()
-#        svg_gen.setFileName(file_path)
-#        svg_gen.setSize(viewport.size())
-#        svg_gen.setViewBox(self.graphics_view.sceneRect())
-#        painter = QPainter(svg_gen)
-#        self._scene.render(painter)
-#        painter.end()
         scene_to_svg_test(self._scene, file_path)
         return 0
 

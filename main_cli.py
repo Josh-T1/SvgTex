@@ -23,6 +23,7 @@ def main():
     args = global_parser.parse_args()
 
     app = QApplication([])
+
     window = MainWindow()
     window.add_shortcut(Qt.Key.Key_T, lambda: print("hello"), "teset" )
     cont = DrawingController()
