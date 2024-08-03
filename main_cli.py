@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 import sys
 from .utils import load_shortcuts
-from .graphics.window import MainWindow
+from .gui.window import MainWindow
 from .drawing import tools
 import logging
 import logging.config

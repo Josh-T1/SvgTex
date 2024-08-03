@@ -6,23 +6,28 @@ from PyQt6.QtWidgets import (QGraphicsEllipseItem, QGraphicsItem, QGraphicsPathI
 
 from ..graphics.graphics_items import DeepCopyableEllipseItem, DeepCopyableLineItem, DeepCopyableRectItem, SelectableRectItem, Textbox
 
-
+# Any graphics item with height or width < tolerence will be discarded from scene. Assumed to be 'miss click'
+TOLERENCE = 10
 
 class DrawingHandler(ABC):
+    """ Abstact base class for drawing handlers """
     @abstractmethod
     def __init__(self, handler_signal: pyqtBoundSignal) -> None:
         self.handler_signal = handler_signal
-    """ Implements drawing behaviour from user inputs. ie how the 'tool' behaves (freehand, curve, ...)  """
+
     @abstractmethod
     def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         pass
     @abstractmethod
     def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         pass
+
     @abstractmethod
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         pass
+
     def max_z_value(self, scene: QGraphicsScene):
+        """ Returns z-value of graphicsitem in the forefront of the scene """
         max_val = 0
         for item in scene.items():
             if not isinstance(item, QGraphicsItem):
@@ -32,6 +37,7 @@ class DrawingHandler(ABC):
         return max_val
 
 class PaintHandler(ABC):
+    """ Abstact base class for tools which 'paint'. eg fill tool """
     @abstractmethod
     def mousePress(self, view: QGraphicsView, event: QMouseEvent, brush: QBrush):
         pass
@@ -48,7 +54,6 @@ class NullDrawingHandler(DrawingHandler):
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         pass
 
-
 class FillPaintHandler(PaintHandler):
     def __init__(self):
         super().__init__()
@@ -64,7 +69,7 @@ class FillPaintHandler(PaintHandler):
                 method(brush)
 
 class TextboxDrawingHandler(DrawingHandler):
-    """ Tool for drawing TextBoxe's """
+    """ Tool for drawing Textbox's """
     def __init__(self, handler_signal):
         super().__init__(handler_signal)
         self.start_point = None
@@ -92,22 +97,23 @@ class TextboxDrawingHandler(DrawingHandler):
 
             start_point = self.start_point if self.start_point.x() < event_pos.x() else QPointF(event_pos.x(), self.start_point.y())
             rect = QRectF(start_point, bottom_right)
-            if not self.selectable_rect_item or not self.rect_item:
+            if not self.rect_item:
                 self.rect_item = Textbox(rect)
                 self.rect_item.moving = True
-                self.selectable_rect_item = SelectableRectItem(self.rect_item, self.handler_signal)
-                scene.addItem(self.selectable_rect_item)
-                self.selectable_rect_item.setZValue(self.max_z_value(scene))
+                scene.addItem(self.rect_item)
             else:
                 self.rect_item.setRect(rect)
 
     def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         scene = view.scene()
+        if scene is None: return
 
-        if self.rect_item and scene and self.selectable_rect_item:
+        scene.removeItem(self.rect_item)
+        if self.rect_item and self.rect_item.boundingRect().width() > (TOLERENCE + 7) and self.rect_item.boundingRect().height() > (TOLERENCE + 7):
             # prevent accidental creation of textbox item
-            if self.selectable_rect_item.boundingRect().width() < 45:
-                scene.removeItem(self.selectable_rect_item)
+            self.selectable_rect_item = SelectableRectItem(self.rect_item, self.handler_signal)
+            scene.addItem(self.selectable_rect_item)
+            self.selectable_rect_item.setZValue(self.max_z_value(scene))
 
             self.rect_item.moving = False
             self.rect_item = None
@@ -120,20 +126,6 @@ class LineDrawingHandler(DrawingHandler):
         self.start_point = None
         self.current_line = None
 
-    def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        if event.button() == Qt.MouseButton.LeftButton and self.current_line:
-            scene = view.scene()
-            if self.start_point is None or scene is None:
-                return
-            end_point = view.mapToScene(event.position().toPoint())
-
-            scene.removeItem(self.current_line)
-            self.current_line.setLine(self.start_point.x(), self.start_point.y(), end_point.x(), end_point.y())
-            selectable_line = SelectableRectItem(self.current_line, self.handler_signal)
-            scene.addItem(selectable_line)
-            selectable_line.setZValue(self.max_z_value(scene))
-            self.start_point = None
-            self.current_line = None
 
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         if (self.start_point is not None and self.current_line is not None):
@@ -148,6 +140,24 @@ class LineDrawingHandler(DrawingHandler):
             scene = view.scene()
             if scene:
                 scene.addItem(self.current_line)
+
+    def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
+        if event.button() == Qt.MouseButton.LeftButton and self.current_line:
+            scene = view.scene()
+            if self.start_point is None or scene is None:
+                return
+            end_point = view.mapToScene(event.position().toPoint())
+
+            self.current_line.setLine(self.start_point.x(), self.start_point.y(), end_point.x(), end_point.y())
+            scene.removeItem(self.current_line)
+            if self.current_line.line().length() > TOLERENCE:
+                selectable_line = SelectableRectItem(self.current_line, self.handler_signal)
+                scene.addItem(selectable_line)
+                selectable_line.setZValue(self.max_z_value(scene))
+
+            self.start_point = None
+            self.current_line = None
+
 
 class ShapeDrawingHandler(DrawingHandler):
     """ Tool for drawing rectangles """
@@ -193,8 +203,11 @@ class ShapeDrawingHandler(DrawingHandler):
         scene = view.scene()
         if scene is not None and self.tmp_scene_item:
             scene.removeItem(self.tmp_scene_item)
-            selectable_rect = SelectableRectItem(self.tmp_scene_item, self.handler_signal)
-            scene.addItem(selectable_rect)
+
+            if self.tmp_scene_item.boundingRect().width() > TOLERENCE or self.tmp_scene_item.boundingRect().height() > TOLERENCE:
+                selectable_rect = SelectableRectItem(self.tmp_scene_item, self.handler_signal)
+                scene.addItem(selectable_rect)
+
             self.drawing_started = False
             self.tmp_scene_item = None
 
@@ -235,16 +248,7 @@ class FreeHandDrawingHandler(DrawingHandler):
         self.current_line = None
         self.current_path_item = None
 
-    def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        scene = view.scene()
-        # Code should run fine without this line
-        if scene is None or self.current_path_item is None:
-            return
 
-        scene.removeItem(self.current_path_item)
-        selectable_path_item = SelectableRectItem(self.current_path_item, self.handler_signal)
-        scene.addItem(selectable_path_item)
-        self.drawing_started = False
 
     def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         scene = view.scene()
@@ -258,10 +262,6 @@ class FreeHandDrawingHandler(DrawingHandler):
             self.current_path_item.setPen(pen)
             scene.addItem(self.current_path_item)
             self.current_path_item.setZValue(self.max_z_value(scene))
-
-    def inBounds(self, scene: QGraphicsScene, event: QMouseEvent) -> bool:
-        """ Returns true if event took place within the bounds of scene """
-        return scene.sceneRect().contains(event.position())
 
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         scene = view.scene()
@@ -278,3 +278,19 @@ class FreeHandDrawingHandler(DrawingHandler):
         if self.current_path.currentPosition() != end:
             self.current_path.lineTo(end)
             self.current_path_item.setPath(self.current_path)
+
+    def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
+        scene = view.scene()
+        # Code should run fine without this line
+        if scene is None or self.current_path_item is None:
+            return
+
+        scene.removeItem(self.current_path_item)
+        if self.current_path_item.path().length() > TOLERENCE:
+            selectable_path_item = SelectableRectItem(self.current_path_item, self.handler_signal)
+            scene.addItem(selectable_path_item)
+        self.drawing_started = False
+
+    def inBounds(self, scene: QGraphicsScene, event: QMouseEvent) -> bool:
+        """ Returns true if event took place within the bounds of scene """
+        return scene.sceneRect().contains(event.position())

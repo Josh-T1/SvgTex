@@ -1,116 +1,28 @@
-from pathlib import Path, PureWindowsPath
-from typing import Any, OrderedDict
+from __future__ import annotations
+from pathlib import Path
+from typing import Any, OrderedDict, Text
 from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPen, QPainterPath, QKeyEvent, QTextCursor, QTransform
 from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt, pyqtBoundSignal, QRectF, QSizeF, QRect
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QGraphicsEllipseItem, QGraphicsLineItem, QGraphicsTextItem,QGraphicsItem, QGraphicsRectItem, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QGraphicsEllipseItem, QGraphicsLineItem, QGraphicsPathItem, QGraphicsTextItem,QGraphicsItem, QGraphicsRectItem, QVBoxLayout, QWidget)
 
-from ..drawing.transformations import RotationHandler, TransformationHandler, ScaleHandler, TestHandler
+from ..drawing.transformation_handlers import RotationHandler, TransformationHandler, ScaleHandler, TestHandler
 from ..utils import KeyCodes, Handlers
 from collections import OrderedDict
 from copy import deepcopy
 from abc import ABC, abstractmethod
 import re
-from lxml import etree
-import numpy as np
+from .transformations import transform_path
 
-def translate_matrix(tx: float, ty: float):
-    return np.array([
-        [1.0, 0.0, tx],
-        [0.0, 1.0, ty],
-        [0.0, 0.0, 1.0]
-    ])
-
-def scale_matrix(sx, sy):
-    return np.array([
-        [sx, 0, 0],
-        [0, sy, 0],
-        [0, 0, 1]
-    ])
-
-def rotate_matrix(angle, cx=0, cy=0):
-    rad = np.radians(angle)
-    cos_a, sin_a = np.cos(rad), np.sin(rad)
-    return np.array([
-        [cos_a, -sin_a, cx - cos_a * cx + sin_a * cy],
-        [sin_a, cos_a, cy - sin_a * cx - cos_a * cy],
-        [0, 0, 1]
-    ])
-
-def skew_x_matrix(angle):
-    return np.array([
-        [1, np.tan(np.radians(angle)), 0],
-        [0, 1, 0],
-        [0, 0, 1]
-    ])
-
-def skew_y_matrix(angle):
-    return np.array([
-        [1, 0, 0],
-        [np.tan(np.radians(angle)), 1, 0],
-        [0, 0, 1]
-    ])
-
-def combine_transforms_from_string(transforms: list[str]):
-    matrix = np.identity(3)
-    for transform in transforms:
-        args = transform.split("(")[1].split(")")[0].split(" ")
-
-        action = transform.split("(")[0] #)
-        if action == "translate":
-            args = [float(arg) for arg in args]
-            matrix = np.dot(matrix, translate_matrix(*args))
-        elif action == "scale":
-            args = [float(arg) for arg in args]
-            matrix = np.dot(matrix, scale_matrix(*args))
-
-        elif action == "rotate":
-            args = [int(arg) for arg in args]
-            matrix = np.dot(matrix, rotate_matrix(*args))
-
-        elif action == "skewX":
-            args = [float(arg) for arg in args]
-            matrix = np.dot(matrix, skew_x_matrix(*args))
-
-        elif action == "skewY":
-            args = [float(arg) for arg in args]
-            matrix = np.dot(matrix, skew_y_matrix(*args))
-
-    return matrix
-
-
-
-
-def translate_path(svg_document: bytes, x_shift: float, y_shift: float, transform: QTransform) -> str:
-    """
-    TODO: This should be possible using the builtin xml.etree instead of lxml.etree
-    """
-    transform_np = np.array([[transform.m11(), transform.m12(), transform.dx()], [transform.m21(), transform.m22(), transform.dy()], [0, 0, 1]])
-    svg_namespace = {'svg': 'http://www.w3.org/2000/svg'}
-    root = etree.fromstring(svg_document)
-
-    for g in root.findall('.//svg:g', namespaces=svg_namespace):
-        paths = g.xpath('.//svg:path', namespaces=svg_namespace)
-        if len(paths) != 0:
-
-            g_transform_attrib = g.attrib.get("transform")
-            if g_transform_attrib:
-                transform_pattern = r'\b[a-zA-Z_]\w*\s*\([^)]*\)' # TODO determine limitation of this regex pattern chatgpt provided...
-
-                matches = re.findall(transform_pattern, g_transform_attrib)
-                matrix = combine_transforms_from_string(reversed(matches))
-                matrix = np.dot(transform_np, matrix)
-                new_transform = f'''matrix({matrix[0][0]:.6f} {matrix[0][1]:.6f} {matrix[1][0]:.6f} {matrix[1][1]:.6f} {matrix[0][2]:.6f} {matrix[1][2]:.6f})'''
-
-                g.set("transform", new_transform)
-    tree = etree.ElementTree(root)
-    return etree.tostring(tree).decode('utf-8')
 
 def color_to_rgb(color: QColor):
+    """ Converts QColor object to string representation following valid svg formatting """
     return f'rgb({color.red()}, {color.green()}, {color.blue()})'
 
 class DeepCopyableGraphicsItem(QGraphicsItem):
+    """ Wrapper for QGraphicsItem that supports deepcopy """
+
     @abstractmethod
     def __deepcopy__(self, memo) -> Any:
         pass
@@ -220,19 +132,22 @@ class DeepCopyableGraphicsItem(QGraphicsItem):
         # Add other brush styles if needed
         return new_brush
 
-    def transform_to_svg(self, transform):
+    def transform_to_svg(self, transform: QTransform) -> str:
         if transform:
             return f'matrix({transform.m11()}, {transform.m12()}, {transform.m21()}, {transform.m22()}, {transform.dx()}, {transform.dy()})'
         else:
             return ''
 
 class StoringQSvgRenderer(QSvgRenderer):
+    """ Wrapper for QSvgRenderer that stores data used to create renderer """
     def __init__(self, contents: QByteArray, parent = None):
         super().__init__(contents, parent=parent)
         self.svg_contents = contents.data().decode('utf-8')
 
 
 class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
+    """ Wrapper for QGraphicsSvgItem that supports deepcopying and conversion to valid SVG code that can be included in a SVG document """
+
     def __init__(self, data: None | StoringQSvgRenderer | str = None, parent=None):
         self.svg_data = None
 
@@ -247,12 +162,14 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
         else:
             super().__init__()
 
-    # make property
-    def svg_body(self):
+    def svg_body(self) -> str:
+        """ Returns svg code representing the scene representation of the SvgItem, that can be directly imbeded into an SVG document """
+
         if not self.svg_data:
             return ""
-        # Translate svg item to reflect its scene position instead of relative position
-        svg_doc = translate_path(self.svg_data.encode('utf-8'), self.transform().dx(), self.transform().dy(), self.transform())
+        # Transform svg item to reflect its scene position instead of relative position
+        svg_doc = transform_path(self.svg_data.encode('utf-8'), self.transform())
+
         start = svg_doc.find("<svg")
         end = svg_doc.rfind("</svg>")
 
@@ -284,17 +201,18 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
         return self.svg_body()
 
 class DeepCopyableEllipseItem(QGraphicsEllipseItem, DeepCopyableGraphicsItem):
+    """ Wrapper for QGraphicsEllipseItem that supports deepcopy """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo) -> DeepCopyableEllipseItem:
         new_item = DeepCopyableEllipseItem(self.rect(), self.parentItem())
         new_item.setPen(self.copy_pen(self.pen()))
         new_item.setBrush(self.copy_brush(self.brush()))
         new_item.setTransform(deepcopy(self.transform(), memo))
         new_item.setPos(deepcopy(self.pos(), memo))
-        new_item.setRotation(self.rotation())
-        new_item.setScale(self.scale())
+#        new_item.setRotation(self.rotation())
+#        new_item.setScale(self.scale())
         new_item.setZValue(self.zValue())
         new_item.setVisible(self.isVisible())
         new_item.setOpacity(self.opacity())
@@ -317,6 +235,7 @@ class DeepCopyableEllipseItem(QGraphicsEllipseItem, DeepCopyableGraphicsItem):
                 f'</g>\n')
 
 class DeepCopyableRectItem(QGraphicsRectItem, DeepCopyableGraphicsItem):
+    """ Wrapper for QGraphicsRectItem that supports deepcopy """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -337,15 +256,15 @@ class DeepCopyableRectItem(QGraphicsRectItem, DeepCopyableGraphicsItem):
                 f'{item_svg}\n'
                 f'</g>\n')
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo) -> DeepCopyableRectItem:
         new_item = DeepCopyableRectItem(self.rect(), self.parentItem())
 
         new_item.setPen(self.copy_pen(self.pen()))
         new_item.setBrush(self.copy_brush(self.brush()))
         new_item.setTransform(deepcopy(self.transform(), memo))
         new_item.setPos(deepcopy(self.pos(), memo))
-        new_item.setRotation(self.rotation())
-        new_item.setScale(self.scale())
+#        new_item.setRotation(self.rotation())
+#        new_item.setScale(self.scale())
         new_item.setZValue(self.zValue())
         new_item.setVisible(self.isVisible())
         new_item.setOpacity(self.opacity())
@@ -353,16 +272,17 @@ class DeepCopyableRectItem(QGraphicsRectItem, DeepCopyableGraphicsItem):
         return new_item
 
 class DeepCopyableLineItem(QGraphicsLineItem, DeepCopyableGraphicsItem):
+    """ Wrapper for QGraphicsLineItem that supports deepcopy """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo) -> DeepCopyableLineItem:
         new_item = DeepCopyableLineItem(self.line(), self.parentItem())
         new_item.setPen(self.copy_pen(self.pen()))
         new_item.setTransform(deepcopy(self.transform(), memo))
         new_item.setPos(deepcopy(self.pos(), memo))
-        new_item.setRotation(self.rotation())
-        new_item.setScale(self.scale())
+#        new_item.setRotation(self.rotation())
+#        new_item.setScale(self.scale())
         new_item.setZValue(self.zValue())
         new_item.setVisible(self.isVisible())
         new_item.setOpacity(self.opacity())
@@ -384,8 +304,51 @@ class DeepCopyableLineItem(QGraphicsLineItem, DeepCopyableGraphicsItem):
                 f'{item_svg}\n'
                 f'</g>\n')
 
+class DeepCopyablePathItem(QGraphicsPathItem, DeepCopyableGraphicsItem):
+    """ Wrapper for QGraphicsPathItem that supports deepcopy """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _path_to_svg(self):
+        path_data = []
+#        for element in self: # TODO
+#            if element.type == QPainterPath.ElementType.MoveToElement:
+#                path_data.append(f"M {element.x} {element.y}")
+#            elif element.type == QPainterPath.ElementType.LineToElement:
+#                path_data.append(f"L {element.x} {element.y}")
+#            elif element.type == QPainterPath.ElementType.CurveToElement:
+#                path_data.append(f"C {element.x} {element.y} {element.controlPoint1.x} {element.controlPoint1.y} {element.controlPoint2.x} {element.controlPoint2.y}")
+#            elif element.type == QPainterPath.ElementType.CloseSubpathElement:
+#                path_data.append("Z")
+
+    def to_svg(self) -> str:
+        pen_svg = self.pen_to_svg(self.pen())
+        brush_svg = self.brush_to_svg(self.brush())
+        transform_svg = self.transform_to_svg(self.transform())
+        item_svg = f'<path'
+#        item_svg = f'<polyline points="{self.line().x1()} {self.line().y1()} {self.line().x2()} {self.line().y2()} " style="{pen_svg}"'
+#        item_svg += ' data-custom-type="DeepCopyableLineItem"/>'
+        for child in self.childItems():
+            if hasattr(child, 'to_svg'):
+                child_to_svg = getattr(child, 'to_svg')
+                item_svg += "   " + child_to_svg()
+        return item_svg
+
+    def __deepcopy__(self, memo) -> DeepCopyablePathItem:
+        # TODO
+        new_item = DeepCopyablePathItem()
+        new_item.setPen(self.copy_pen(self.pen()))
+        new_item.setBrush(self.copy_brush(self.brush()))
+        new_item.setTransform(deepcopy(self.transform(), memo))
+        new_item.setPos(deepcopy(self.pos(), memo))
+        new_item.setZValue(self.zValue())
+        new_item.setVisible(self.isVisible())
+        new_item.setOpacity(self.opacity())
+        new_item.setFlags(self.flags())
+        return new_item
+
 class SelectableRectItem(QGraphicsItem):
-    """ Selectable container for QGraphicsItems's """
+    """ Selectable container for QGraphicsItems """
 
     selectableItems: OrderedDict = OrderedDict()
     selectEnabled = True
@@ -644,7 +607,7 @@ class SelectableRectItem(QGraphicsItem):
                 item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
                 item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo) -> SelectableRectItem:
         copy_item = SelectableRectItem(deepcopy(self.item), select_signal=self.select_signal)
         SelectableRectItem._toggle_active(SelectableRectItem.last_signal)
         return copy_item
@@ -654,6 +617,7 @@ class SelectableRectItem(QGraphicsItem):
 
 
 class ClippedTextItem(QGraphicsTextItem):
+    """ Wrapper for QGraphicsTextItem that supports a 'clipped rect', where text outside of the rect bounds will not be displayed """
     def __init__(self, text: str, clip_rect, parent=None):
         super().__init__(text, parent)
         self.text = text
@@ -715,7 +679,6 @@ class Textbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
         if event.key() == KeyCodes.Key_Delete.value:
             cursor = self.text_item.textCursor()
             cursor.deletePreviousChar()
-
             event.accept()
 
         elif event.key() == KeyCodes.Key_Left.value:
@@ -738,28 +701,18 @@ class Textbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
             new_rect = matrix.mapRect(current_rect)
             self.setRect(new_rect)
 
-    def text(self):
-
+    def text(self) -> str:
+        """ Returns textbox content as plain text """
         return self.text_item.toPlainText()
 
-    def __deepcopy__(self, memo) -> Any:
-        rect_copy = QRectF(self.rect().x(), self.rect().y(), self.rect().width(), self.rect().height())
-        new_item = Textbox(rect_copy)
-        # This is a temporary fix. When the item is copied and then added to scene the text does not appear. It seems that super().setRect(*args) in setRect() needs to be called for text to display...
-        new_item.setRect(rect_copy)
-        return new_item
-
-    def to_svg(self):
+    def to_svg(self) -> str:
         font_item = self.text_item.font()
         transform_svg = self.transform_to_svg(self.transform())
         item_svg = f'<text x="{self.rect().x()}" y="{self.rect().y()}" font-family="{font_item.family()}" font-size="{font_item.pointSize()}" fill="{color_to_rgb(self.text_item.defaultTextColor())}"'
         item_svg += f' data-custom-type="DeepCopyableRectItem"'
         item_svg += f' data-custom-params="({self.rect().width()}, {self.rect().height()}, {self.text()})">\n'
-#        item_svg += f' style="{pen_svg};{brush_svg}"'
         item_svg += f"   {self.text()}\n"
         item_svg += f'</text>'
-
-
 
         for child in self.childItems():
             if hasattr(child, "to_svg"):
@@ -769,3 +722,10 @@ class Textbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
         return (f'<g transform="{transform_svg}">\n'
                 f'{item_svg}\n'
                 f'</g>\n')
+
+    def __deepcopy__(self, memo) -> Textbox:
+        rect_copy = QRectF(self.rect().x(), self.rect().y(), self.rect().width(), self.rect().height())
+        new_item = Textbox(rect_copy)
+        # This is a temporary fix. When the item is copied and then added to scene the text does not appear. It seems that super().setRect(*args) in setRect() needs to be called for text to display...
+        new_item.setRect(rect_copy)
+        return new_item
