@@ -8,8 +8,7 @@ from .drawing import tools
 import logging
 import logging.config
 from pathlib import Path
-from .control.shortcut_manager import ShortcutManager
-from .control.drawing_controller import DrawingController
+from .drawing.drawing_controller import DrawingController
 from .utils import lazy_import, load_shortcuts, config
 
 
@@ -28,7 +27,6 @@ def main():
     window.add_shortcut(Qt.Key.Key_T, lambda: print("hello"), "teset" )
     cont = DrawingController()
     # remove scene probably
-    shortcut_manager = ShortcutManager(window._scene, window.closeEvent)
 #    shortcuts_module = lazy_import("user_shortcuts", config["user-shortcuts-path"], "VectorGraphics.shortcuts")
 #    print(shortcuts_module, "m")
 #    if shortcuts_module:
@@ -38,7 +36,6 @@ def main():
 
     handler = tools.NullDrawingHandler(cont.handler_signal)
     cont.setHandler(handler)
-    cont.setShortcutManager(shortcut_manager)
     window.setController(cont)
     file_args = args.file
     if file_args and str(file_args[0]).endswith(".svg") and Path(file_args[0]).is_file():

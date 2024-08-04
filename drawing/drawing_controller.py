@@ -3,7 +3,6 @@ from PyQt6.QtCore import QObject, Qt, pyqtBoundSignal, pyqtSignal,  QRectF
 from PyQt6.QtWidgets import (QGraphicsPathItem, QGraphicsView, QGraphicsScene, QGraphicsLineItem)
 from ..drawing.tools import EllipseDrawingHandler, FillPaintHandler, DrawingHandler, LineDrawingHandler, PaintHandler, RectDrawingHandler, TextboxDrawingHandler, FreeHandDrawingHandler, NullDrawingHandler
 from ..utils import Handlers
-from .shortcut_manager import ShortcutManager
 
 class DrawingController(QObject):
     """
@@ -16,7 +15,6 @@ class DrawingController(QObject):
     def __init__(self, handler: DrawingHandler | PaintHandler | None = None,
                  scene_view: QGraphicsView | None = None,
                  pen: QPen | None = None,
-                 shortcut_manager: ShortcutManager | None = None,
                  brush: QBrush | None = None
                  ):
         """
@@ -26,7 +24,6 @@ class DrawingController(QObject):
         """
         super().__init__()
         self.scene_view = scene_view
-        self.shortcut_manager = shortcut_manager
         self.handler = handler if handler is not None else NullDrawingHandler(handler_signal=self.handler_signal)
         self.pen = pen if pen is not None else QPen(Qt.GlobalColor.black)
         self.brush = brush if brush is not None else QBrush(Qt.GlobalColor.black)
@@ -68,8 +65,6 @@ class DrawingController(QObject):
     def setPenColor(self, color: QColor):
         self.pen.setColor(color)
 
-    def setShortcutManager(self, shortcut_manager: ShortcutManager):
-        self.shortcut_manager = shortcut_manager
 
     def setFill(self, color: QColor):
         self.brush.setColor(color)

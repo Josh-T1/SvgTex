@@ -81,9 +81,12 @@ def transform_path(svg_document: bytes, transform: QTransform) -> str:
 
     -- Params --
     svg_document: A byte sequence representing an SVG document.
-                  The bytes should contain a valid SVG XML structure. For example:
+                  The bytes should contain a valid SVG XML structure. e.g:
                     ```
-                    b'<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">\n  <circle cx="50" cy="50" r="40" stroke="black" stroke-width="3" fill="red" />\n</svg>'
+                    b'<?xml version="1.0" encoding="UTF-8"?>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                    <circle cx="50" cy="50" r="40" stroke="black" stroke-width="3" fill="red" />
+                    </svg>'
                     ```
     returns: SVG document encoded in utf-8
 

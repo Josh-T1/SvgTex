@@ -178,11 +178,12 @@ def scene_to_svg(scene: QGraphicsScene, filename: str):
 
     svg_content = ''
     for item in scene.items():
-        if item.parentItem() is None:
+        if item.parentItem() is None: # Only consider Selectable rect items
             if hasattr(item, 'to_svg'):
                 to_svg = getattr(item, 'to_svg')
-                print(to_svg)
                 svg_content += to_svg() + '\n'
+        else:
+            print(item)
 
     full_svg = (
             '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'

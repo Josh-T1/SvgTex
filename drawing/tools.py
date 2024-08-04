@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from PyQt6.QtGui import QBrush, QKeyEvent, QMouseEvent, QPen, QPainterPath
-from PyQt6.QtCore import QObject, QPointF, Qt, pyqtBoundSignal, pyqtSignal,  QRectF
-from PyQt6.QtWidgets import (QGraphicsEllipseItem, QGraphicsItem, QGraphicsPathItem, QGraphicsRectItem, QGraphicsView, QGraphicsScene, QGraphicsLineItem)
+from PyQt6.QtGui import QBrush, QMouseEvent, QPen, QPainterPath
+from PyQt6.QtCore import QPointF, Qt, pyqtBoundSignal, QRectF
+from PyQt6.QtWidgets import (QGraphicsItem, QGraphicsPathItem, QGraphicsView, QGraphicsScene)
 
-from ..graphics.graphics_items import DeepCopyableEllipseItem, DeepCopyableLineItem, DeepCopyableRectItem, SelectableRectItem, Textbox
+from ..graphics import DeepCopyableEllipseItem, DeepCopyableLineItem, DeepCopyablePathItem, DeepCopyableRectItem, SelectableRectItem, DeepCopyableTextbox
 
-# Any graphics item with height or width < tolerence will be discarded from scene. Assumed to be 'miss click'
+# GraphicsItems with size smaller than tolerence will be discarded from scene. Assumed to be 'miss click' items
 TOLERENCE = 10
 
 class DrawingHandler(ABC):
@@ -248,8 +248,6 @@ class FreeHandDrawingHandler(DrawingHandler):
         self.current_line = None
         self.current_path_item = None
 
-
-
     def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         scene = view.scene()
         if scene is None:
@@ -287,7 +285,9 @@ class FreeHandDrawingHandler(DrawingHandler):
 
         scene.removeItem(self.current_path_item)
         if self.current_path_item.path().length() > TOLERENCE:
-            selectable_path_item = SelectableRectItem(self.current_path_item, self.handler_signal)
+            copyable_path = DeepCopyablePathItem(self.current_path_item.path())
+            copyable_path.setPen(pen)
+            selectable_path_item = SelectableRectItem(copyable_path, self.handler_signal)
             scene.addItem(selectable_path_item)
         self.drawing_started = False
 
