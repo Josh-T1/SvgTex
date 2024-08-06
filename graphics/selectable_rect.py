@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import OrderedDict
-from PyQt6.QtGui import QPen, QPainterPath
+from PyQt6.QtGui import QPen, QPainterPath, QTransform
 from PyQt6.QtCore import QPointF, Qt, pyqtBoundSignal, QRectF
 from PyQt6.QtWidgets import QGraphicsItem
 from ..drawing.transformation_handlers import RotationHandler, TransformationHandler, ScaleHandler
@@ -24,7 +24,7 @@ class SelectableRectItem(QGraphicsItem):
 
         self.item = item
         self._id = id(self)
-
+        self._transform = QTransform()
         self.setAcceptHoverEvents(True)
         self.select_signal = select_signal
         if select_signal:
@@ -54,8 +54,8 @@ class SelectableRectItem(QGraphicsItem):
         if hasattr(item, 'to_svg'):
             self.__setattr__('to_svg', getattr(item, 'to_svg'))
 
-#    def transform(self):
-#        return self.item.transform()
+    def transform(self):
+        return self._transform
 
     def _register_transformation_handlers(self) -> list[TransformationHandler]:
         rotation_handler = RotationHandler(self.rotatingRectIcon, self)
@@ -98,11 +98,12 @@ class SelectableRectItem(QGraphicsItem):
                 item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
                 cls.selector_name = None
 
-    def setTransform(self, matrix, combine=False) -> None:
+    def setTransform(self, matrix: QTransform, combine=False) -> None:
         if round(matrix.determinant(), 3) != 1:
             self.item.setTransform(matrix, combine=combine)
         else:
             QGraphicsItem.setTransform(self, matrix, combine=combine)
+        self._transform = matrix * self._transform
         self.prepareGeometryChange()
         self.update()
 

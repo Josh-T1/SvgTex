@@ -74,7 +74,7 @@ class TextboxDrawingHandler(DrawingHandler):
         super().__init__(handler_signal)
         self.start_point = None
         self.drawing = False
-        self.rect_item: Textbox | None = None
+        self.rect_item: DeepCopyableTextbox | None = None
         self.selectable_rect_item: SelectableRectItem | None = None
 
     def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
@@ -98,7 +98,7 @@ class TextboxDrawingHandler(DrawingHandler):
             start_point = self.start_point if self.start_point.x() < event_pos.x() else QPointF(event_pos.x(), self.start_point.y())
             rect = QRectF(start_point, bottom_right)
             if not self.rect_item:
-                self.rect_item = Textbox(rect)
+                self.rect_item = DeepCopyableTextbox(rect)
                 self.rect_item.moving = True
                 scene.addItem(self.rect_item)
             else:

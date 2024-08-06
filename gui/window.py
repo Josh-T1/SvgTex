@@ -7,12 +7,14 @@ from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel,
                              QMessageBox, QPinchGesture, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                              QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem, QGraphicsRectItem)
+
 from ..drawing.drawing_controller import DrawingController
-from ..graphics import DeepCopyableSvgItem, StoringQSvgRenderer, DeepCopyableTextbox, SelectableRectItem
+from ..graphics import DeepCopyableSvgItem, StoringQSvgRenderer, DeepCopyableTextbox, SelectableRectItem, DeepCopyableItemGroup
 from pathlib import Path
 from collections import deque
 import logging
-from ..svg.load_svg import scene_to_svg as scene_to_svg_test, SvgGraphicsFactory
+from ..svg.load_svg import scene_to_svg as scene_to_svg, build_scene_items
+from ..svg.svg_parser import SvgBuilder
 from ..utils import tex2svg, text_is_latex, Handlers
 logger = logging.getLogger(__name__)
 
@@ -177,7 +179,7 @@ class TexGraphicsScene(QGraphicsScene):
     def compile_latex(self):
         for item in self.items():
             parent = item.parentItem()
-            if not isinstance(item, Textbox) or not isinstance(parent, SelectableRectItem):
+            if not isinstance(item, DeepCopyableTextbox) or not isinstance(parent, SelectableRectItem):
                 continue
 
             res_item = self.attempt_compile(item.text())
@@ -193,15 +195,24 @@ class TexGraphicsScene(QGraphicsScene):
 
     def attempt_compile(self, text):
         if not text_is_latex(text):
-            return
+            return None
         svg_bytes = tex2svg(text)
         if not svg_bytes:
             return
-        svg_data = QByteArray(svg_bytes.read())
-        renderer = StoringQSvgRenderer(svg_data)
-        item = DeepCopyableSvgItem(renderer)
-        item.setSharedRenderer(renderer)
-        return item
+        # parse document and make SVg GroupItem
+#        svg_data = QByteArray(svg_bytes.read())
+
+        builder = SvgBuilder(svg_bytes.read())
+        svg_items = builder.build_scene_items()
+        group = DeepCopyableItemGroup()
+        for item in svg_items:
+            group.addToGroup(item)
+
+
+#        renderer = StoringQSvgRenderer(svg_data)
+#        item = DeepCopyableSvgItem(renderer)
+#        item.setSharedRenderer(renderer)
+        return group
 
 class IntBox(QWidget):
     clicked = pyqtSignal(int)
@@ -567,14 +578,6 @@ class MainWindow(QMainWindow):
         if Path(file_path).is_file():
             self.load_svg(file_path)
 
-    def scene_to_svg(self, file_path):
-        """ Return 0 if not error else 1
-        TODO: Re write this"""
-        viewport = self.graphics_view.viewport()
-        if viewport is None: return
-        scene_to_svg_test(self._scene, file_path)
-        return 0
-
     def closeEvent(self, event: QCloseEvent): #type: ignore
         """ TODO: Make this better """
         if self.filename != UNSAVED_NAME:
@@ -616,7 +619,7 @@ class MainWindow(QMainWindow):
         else:
             file_path = self._filepath
 
-        return_code = self.scene_to_svg(file_path)
+        return_code = scene_to_svg(self._scene, file_path)
         if return_code == 1:
             display_name = f"error while saving: {file_path}" if return_code == 1 else file_path.split("/")[-1]
             self.filename_widget.setText(display_name)
@@ -626,11 +629,10 @@ class MainWindow(QMainWindow):
 
     def save(self):
         """ Save svg """
-        self.scene_to_svg(self._filepath)
+        scene_to_svg(self._scene, self._filepath)
 
     def build_svg(self):
-        builder = SvgGraphicsFactory(self._scene)
-        builder.build(self._filepath)
+        pass
 
     def open_with_svg(self, filepath: str):
         """ Loads svg and sets filename to svg name. Implements 'editing' functionality, the original svg will

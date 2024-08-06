@@ -1,4 +1,4 @@
-import VectorGraphics.graphics.graphics_items as gf
+import VectorGraphics.graphics as gf
 import unittest
 import numpy.testing as np
 from PyQt6.QtGui import QColor

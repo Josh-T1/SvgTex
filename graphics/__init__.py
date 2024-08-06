@@ -1,6 +1,6 @@
 from .selectable_rect import SelectableRectItem
 from .wrappers import (DeepCopyableGraphicsItem, StoringQSvgRenderer, DeepCopyableSvgItem, DeepCopyableEllipseItem,
-                       DeepCopyableRectItem, DeepCopyableLineItem, DeepCopyablePathItem, DeepCopyableTextbox)
+                       DeepCopyableRectItem, DeepCopyableLineItem, DeepCopyablePathItem, DeepCopyableTextbox, DeepCopyableItemGroup)
 __all__ = [
         "SelectableRectItem",
         "DeepCopyableGraphicsItem",
@@ -10,5 +10,6 @@ __all__ = [
         "DeepCopyableRectItem",
         "DeepCopyableLineItem",
         "DeepCopyablePathItem",
-        "DeepCopyableTextbox"
+        "DeepCopyableTextbox",
+        "DeepCopyableItemGroup"
         ]
