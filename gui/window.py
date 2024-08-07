@@ -190,7 +190,7 @@ class TexGraphicsScene(QGraphicsScene):
                 parent.item = res_item
                 # not sure this is necessary
                 self.removeItem(item)
-                item.setParentItem(None)
+#                item.setParentItem(None)
                 del item
 
     def attempt_compile(self, text):
@@ -204,11 +204,13 @@ class TexGraphicsScene(QGraphicsScene):
 
         builder = SvgBuilder(svg_bytes.read())
         svg_items = builder.build_scene_items()
-        group = DeepCopyableItemGroup()
-        for item in svg_items:
-            group.addToGroup(item)
-
-
+        if len(svg_items) == 0: return None
+        if len(svg_items) > 1:
+            svg_items = svg_items[1:] # hack solution. First element is always a 'patch path' whatever that means
+        group = svg_items[0]
+#        group = DeepCopyableItemGroup()
+#        for item in svg_items:
+#            group.addToGroup(item)
 #        renderer = StoringQSvgRenderer(svg_data)
 #        item = DeepCopyableSvgItem(renderer)
 #        item.setSharedRenderer(renderer)

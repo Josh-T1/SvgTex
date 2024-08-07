@@ -54,6 +54,15 @@ class SelectableRectItem(QGraphicsItem):
         if hasattr(item, 'to_svg'):
             self.__setattr__('to_svg', getattr(item, 'to_svg'))
 
+#    def to_svg(self):
+#        item_svg = ""
+#        if hasattr(self.item, "to_svg"):
+#            to_svg = getattr(self.item, "to_svg")
+#            item_svg = "    " + to_svg()
+#        transform_svg = DeepCopyableGraphicsItem.transform_to_svg(self.transform())
+#        return (f'<g transform="{transform_svg}"\n'
+#                f'{item_svg}\n'
+#                f'</g>\n')
     def transform(self):
         return self._transform
 

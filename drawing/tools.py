@@ -107,8 +107,8 @@ class TextboxDrawingHandler(DrawingHandler):
     def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         scene = view.scene()
         if scene is None: return
-
-        scene.removeItem(self.rect_item)
+        if self.rect_item:
+            scene.removeItem(self.rect_item)
         if self.rect_item and self.rect_item.boundingRect().width() > (TOLERENCE + 7) and self.rect_item.boundingRect().height() > (TOLERENCE + 7):
             # prevent accidental creation of textbox item
             self.selectable_rect_item = SelectableRectItem(self.rect_item, self.handler_signal)

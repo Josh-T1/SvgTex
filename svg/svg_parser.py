@@ -153,9 +153,9 @@ def parse_d_attribute(d_attr: str) -> QPainterPath:
             i += 1
     return path
 
-def parse_element_style(element, default: Dict[Literal["fill", "stroke", "stroke-width", "stroke-linecap"], Any] | None = None):
+def parse_element_style(element, default: Dict[Literal["fill", "stroke", "stroke-width", "stroke-linecap"], Any] | None = None) -> tuple[QPen, QBrush]:
     # Initialize default QPen and QBrush
-    _defaults = {"fill": None, "stroke": None, "stroke-width": None, "stroke-linecap": None}
+    _defaults = {"fill": None, "stroke": "black", "stroke-width": None, "stroke-linecap": None}
     if default:
         _defaults.update(default) #type: ignore ... probably
     pen = QPen()
@@ -168,9 +168,10 @@ def parse_element_style(element, default: Dict[Literal["fill", "stroke", "stroke
     stroke_linecap = element.attrib.get('stroke-linecap', _defaults["stroke-linecap"])
 
     # Apply fill color to QBrush
-    if fill_color:
-        brush.setColor(QColor(fill_color))
-
+    if fill_color: # for some reason ```brush = QBrush(); brush.setColor(QColor("black"))``` does not work.. tmp fix
+        brush = QBrush(QColor("black"))
+    else:
+        brush = QBrush(QColor("transparent")) # does this work
     # Apply stroke color to QPen
     if stroke_color:
         pen.setColor(QColor(stroke_color))
@@ -193,6 +194,7 @@ def parse_element_style(element, default: Dict[Literal["fill", "stroke", "stroke
 def parse_style(style: str):
     # Default pen and brush
     pen = QPen()
+    pen.setColor(QColor("white")) # svg docs default to white stroke while QPen defaults to black
     brush = QBrush()
 
     # Split style into properties
@@ -207,7 +209,6 @@ def parse_style(style: str):
 
         if key == 'fill':
             # Handle brush color
-            print(value, "fill avlelasjdlfj")
             brush.setColor(QColor(value))
         elif key == 'stroke':
             # Handle pen color
@@ -247,8 +248,6 @@ class SvgBuilder:
                     "text": self.build_textbox,
                     "line": self.build_line,
                     }
-        self.local_transform: QTransform = QTransform()
-        self.local_defs: dict[int, etree._Element] = {}
 
     def has_g_ancestor(self, tag: etree._Element):
         has_g_ancestor = False
@@ -261,6 +260,7 @@ class SvgBuilder:
         return has_g_ancestor
 
     def build_scene_items(self):
+        print(etree.tostring(self.root, encoding='utf-8', pretty_print=True))
         scene_items = []
         g_elements = self.root.findall('.//svg:g', namespaces=self.svg_namespace)
         outer_g_elements = [e for e in g_elements if not self.has_g_ancestor(e)]
@@ -273,13 +273,18 @@ class SvgBuilder:
             scene_items.extend(g_items)
         return scene_items
 
-    def parse_defs_element(self, defs_element) -> dict:
+    def parse_defs_element(self, defs_element: etree._Element, parent_attr, parent_transform) -> dict:
         defs = {}
         for e in defs_element:
             if isinstance(e, etree._Comment):
                 continue
             if (id := e.attrib.get("id", None)):
                 defs[id] = e
+            if self.element_name(e) == "use":
+                self.parse_use_element(e, parent_attr, parent_transform, defs)
+
+            if self.element_name(e) not in self.func_map.keys():
+                self.parse_defs_element(e, parent_attr, parent_transform)
         return defs
 
 
@@ -289,39 +294,48 @@ class SvgBuilder:
         element_transform = element.attrib.get("transform", None)
         element_transform = self.combine_parent_child_transform(element_transform, parent_transform)
         element_attr = parent_attr
+
         if self.element_name(element) == "g":
             element_attr = parent_attr | dict(element.attrib)
 
         for e in element:
+            print(e)
             if isinstance(e, etree._Comment):
                 continue
             if self.element_name(e) == "defs":
-                defs.update(self.parse_defs_element(e))
+                defs.update(
+                        self.parse_defs_element(e, element_attr, element_transform)
+                        )
                 continue
 
             elif self.element_name(e) == "use":
                 # Check if item was define in def tags
-                if (id := e.attrib.get("id", None)):
-                    if (def_item := defs.get(id, None)):
-                        func = self.func_map.get(self.element_name(def_item))
-                        # Check if element is scene element
-                        if func:
-                            # use tag can define transform which is applied after transform specified in defs tag
-                            use_transform = e.attrib.get("transform", None)
-                            use_transform = self.combine_parent_child_transform(use_transform, element_transform)
-                            # Defined element attributes default to those defined in use tag
-                            for k, v in e.attrib.items():
-                                if k == "transform":
-                                    continue
-                                def_item.attrib[k] = v
-                            item = func(def_item, element_attr, use_transform)
-                            if item:
-                                e_items.append(def_item)
+                element_id = None
+                for k, v in e.attrib.items():
+                    if k.endswith("href"):
+                        element_id = v[1:] # remove starting '#'
+                if element_id is None: continue
+                def_item = defs.get(element_id, None)
+
+                if isinstance(def_item, etree._Element):
+                    func = self.func_map.get(self.element_name(def_item))
+                    # Check if element is scene element
+                    if func:
+                        # use tag can define transform which is applied after transform specified in defs tag
+                        use_transform = e.attrib.get("transform", None)
+                        use_transform = self.combine_parent_child_transform(use_transform, element_transform)
+                        # Defined element attributes default to those defined in use tag
+                        for k, v in e.attrib.items():
+                            if k == "transform":
+                                continue
+                            def_item.attrib[k] = v
+                        item = func(def_item, element_attr, use_transform)
+                        if item:
+                            e_items.append(item)
                 continue
 
-
-            func = self.func_map.get(self.element_name(e))
-            if not func:
+            func = self.func_map.get(self.element_name(e), None)
+            if func is None:
                 items = self.parse_element(e, element_attr, parent_transform=element_transform)
                 e_items.extend(items)
                 continue
@@ -330,6 +344,27 @@ class SvgBuilder:
                 e_items.append(item)
         return e_items
 
+    def parse_use_element(self, use_element, parent_attrs, parent_transform, defs: dict) -> DeepCopyableGraphicsItem | None:
+        print("Parsing use element")
+        # Check if item was define in def tags
+        if (id := use_element.attrib.get("id", None)):
+            if (def_item := defs.get(id, None)):
+                func = self.func_map.get(self.element_name(def_item))
+                # Check if element is scene element
+                if func is None:
+                    return None
+
+                # use tag can define transform which is applied after transform specified in defs tag
+                use_transform = use_element.attrib.get("transform", None)
+                use_transform = self.combine_parent_child_transform(use_transform, parent_transform)
+                # Defined element attributes default to those defined in use tag
+                for k, v in use_element.attrib.items():
+                    if k == "transform":
+                        continue
+                    def_item.attrib[k] = v
+                item = func(def_item, parent_attrs, use_transform)
+                return item
+        return None
 
     def element_name(self, element: etree._Element) -> str:
         """ Returns element name from element """
@@ -346,8 +381,9 @@ class SvgBuilder:
                 return build_transform(child_transform)
         return parent_transform
 
-    def build_ellipse(self, element: etree._Element, attrs: dict, parent_transform: QTransform | None):
+    def build_ellipse(self, element: etree._Element, parent_attrs: dict, parent_transform: QTransform | None) -> DeepCopyableEllipseItem:
         transform = self.combine_parent_child_transform(element.attrib.get("transform", None), parent_transform)
+        attrs = parent_attrs | dict(element.attrib)
         style = attrs.get("style", None)
         if style is None:
             pen, brush = parse_element_style(element)
@@ -364,8 +400,9 @@ class SvgBuilder:
             ellipse_item.setTransform(transform)
         return ellipse_item
 
-    def build_rect(self, element: etree._Element, attrs: dict, parent_transform: QTransform | None):
+    def build_rect(self, element: etree._Element, parent_attrs: dict, parent_transform: QTransform | None):
         transform = self.combine_parent_child_transform(element.attrib.get("transform", None), parent_transform)
+        attrs = parent_attrs | dict(element.attrib)
         style = attrs.get("style", None)
         if style is None:
             pen, brush = parse_element_style(element)
@@ -382,15 +419,18 @@ class SvgBuilder:
             rect_item.setTransform(transform)
         return rect_item
 
-    def build_path(self, element: etree._Element, attrs: dict, parent_transform: QTransform | None):
+    def build_path(self, element: etree._Element, parent_attrs: dict, parent_transform: QTransform | None):
         transform = self.combine_parent_child_transform(element.attrib.get("transform", None), parent_transform)
+        print(element.attrib, "path element")
+        print(parent_attrs, "parent attrs")
+        attrs = parent_attrs | dict(element.attrib)
         path_str = attrs.get("d", None)
         style = attrs.get("style", None)
         if path_str is None:
             return
-
+        print(style)
         if style is None:
-            pen, brush = parse_element_style(element, default={"fill": "black"})
+            pen, brush = parse_element_style(element, default={"stroke": "black", "fill": "black"})
         else:
             pen, brush = parse_style(style)
 
