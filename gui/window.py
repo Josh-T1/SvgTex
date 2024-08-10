@@ -644,8 +644,9 @@ class MainWindow(QMainWindow):
 
     def load_svg(self, file_path: str, scale=0.5):
         """ TODO """
-        svg_item = DeepCopyableSvgItem(file_path)
-        svg_item.setFlag(QGraphicsSvgItem.GraphicsItemFlag.ItemClipsToShape, True) # Make background transparent
+#        svg_item = DeepCopyableSvgItem(file_path)
+        builder = SvgBuilder(Path(file_path))
+        svg_items = builder.build_scene_items()
         cont = self.graphics_view.controller()
         if cont:
             handler = cont.handler
@@ -653,9 +654,15 @@ class MainWindow(QMainWindow):
         else:
             signal = None
             handler = None
-        selectable_item = SelectableRectItem(svg_item, signal) # TODO
-        #selectable_item.setScale(scale) # TODO determine scale based on width relative to window width, height width
-        self._scene.addItem(selectable_item)
+
+        for svg_item in svg_items:
+            svg_item.setFlag(QGraphicsSvgItem.GraphicsItemFlag.ItemClipsToShape, True) # Make background transparent
+            if signal:
+                selectable_item = SelectableRectItem(svg_item, signal) # TODO
+            else:
+                selectable_item = SelectableRectItem(svg_item) # TODO
+            #selectable_item.setScale(scale) # TODO determine scale based on width relative to window width, height width
+            self._scene.addItem(selectable_item)
         # hack to 'refresh' signals.. without this loaded graphic won't be selectable untill selector button is pressed again
         if handler and signal:
             signal.emit(handler.__class__.__name__)

@@ -139,7 +139,7 @@ class DeepCopyableGraphicsItem(QGraphicsItem):
         if transform is None: return ''
         m11, m12, m21, m22 = transform.m11(), transform.m12(), transform.m21(), transform.m22()
         dx, dy = transform.dx(), transform.dy()
-        return f'matrix({m11}, {m12}, {m21}, {m22}, {dx}, {dy})'
+        return f'matrix({m11} {m12} {m21} {m22} {dx} {dy})'
 
 class StoringQSvgRenderer(QSvgRenderer):
     """ Wrapper for QSvgRenderer that stores data used to create renderer """
