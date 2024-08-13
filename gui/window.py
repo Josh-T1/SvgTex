@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from copy import deepcopy
-from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QColor, QCursor, QGuiApplication, QIcon, QKeyEvent, QKeySequence, QMouseEvent, QPen, QPainter, QPixmap, QTransform
+from typing import Literal
+from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QColor, QCursor, QGuiApplication, QIcon, QKeyEvent, QKeySequence, QMouseEvent, QPaintEvent, QPen, QPainter, QPixmap, QTransform
 from PyQt6.QtCore import QByteArray, QKeyCombination, QPointF, QRect, Qt, QRectF, pyqtSignal, QEvent, QSize
 from PyQt6.QtSvg import QSvgGenerator, QSvgRenderer
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
@@ -13,8 +14,7 @@ from ..graphics import DeepCopyableSvgItem, StoringQSvgRenderer, DeepCopyableTex
 from pathlib import Path
 from collections import deque
 import logging
-from ..svg.load_svg import scene_to_svg as scene_to_svg, build_scene_items
-from ..svg.svg_parser import SvgBuilder
+from ..svg import scene_to_svg, SvgBuilder
 from ..utils import tex2svg, text_is_latex, Handlers
 logger = logging.getLogger(__name__)
 
@@ -58,12 +58,39 @@ class ToggleMenuWidget(QWidget):
     def _add_widgets(self):
         self.toggle_menu_layout.addWidget(self.label)
 
+class RulerWidget(QWidget):
+    def __init__(self, orientation: Literal["horizontal", "vertical"], parent=None):
+        super().__init__(parent)
+        self.orientation = orientation
+        if self.orientation == "horizontal": self.setFixedWidth(20)
+        else: self.setFixedHeight(20)
+        self.setAutoFillBackground(True)
+        pallete = self.palette()
+        pallete.setColor(self.backgroundRole(), QColor("lightgray"))
+        self.setPalette(pallete)
+
+    def paintEvent(self, event: QPaintEvent):
+        if not (parent := self.parent()): return
+        painter = QPainter(self)
+        painter.setPen(QPen(Qt.GlobalColor.black, 1))
+        if self.orientation == 'horizontal':
+            height = self.height()
+            view_width = parent.view.width()
+            for x in range(0, view_width, 50):  # Draw ticks every 50 pixels
+                painter.drawLine(x, 0, x, height)
+                painter.drawText(x + 2, height - 5, str(x))
+        else:
+            width = self.width()
+            view_height = parent.view.height()
+            for y in range(0, view_height, 50):  # Draw ticks every 50 pixels
+                painter.drawLine(0, y, width, y)
+                painter.drawText(width - 30, y + 5, str(y))
 
 class GraphicsView(QGraphicsView):
     def __init__(self, controller: None | DrawingController = None):
         super().__init__()
         self._controller =  controller
-        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
     def mousePressEvent(self, event):
         if self._controller and event:
@@ -186,11 +213,19 @@ class TexGraphicsScene(QGraphicsScene):
 
             if res_item is not None:
                 global_pos = item.mapToScene(item.boundingRect().topLeft())# - parent.pos()
-                res_item.setTransform(QTransform().translate(global_pos.x(), global_pos.y()))
-                parent.item = res_item
-                # not sure this is necessary
+#                res_item.setTransform(QTransform().translate(global_pos.x(), global_pos.y()))
+
+                res_item.setPos(global_pos.x(), global_pos.y())
+                res_item.setTransform(QTransform().scale(0.0025, -0.0025))
+                selectable_item = SelectableRectItem(res_item)
+
+#                self.addItem(res_item)
+                self.addItem(selectable_item)
+                print(selectable_item.boundingRect())
+#                parent.item = res_item
+                item.setParentItem(None)
+                self.removeItem(parent)
                 self.removeItem(item)
-#                item.setParentItem(None)
                 del item
 
     def attempt_compile(self, text):
@@ -207,14 +242,14 @@ class TexGraphicsScene(QGraphicsScene):
         if len(svg_items) == 0: return None
         if len(svg_items) > 1:
             svg_items = svg_items[1:] # hack solution. First element is always a 'patch path' whatever that means
-        group = svg_items[0]
 #        group = DeepCopyableItemGroup()
 #        for item in svg_items:
 #            group.addToGroup(item)
-#        renderer = StoringQSvgRenderer(svg_data)
+#        group.addItem(svg_items[0])
+#        renderer = StoringQSvgRenderer(group)
 #        item = DeepCopyableSvgItem(renderer)
 #        item.setSharedRenderer(renderer)
-        return group
+        return svg_items[0]
 
 class IntBox(QWidget):
     clicked = pyqtSignal(int)
@@ -526,12 +561,20 @@ class MainWindow(QMainWindow):
 
 
     def _create_widgets(self):
+
         self.graphics_view = GraphicsView()
+#        self.top_Ruler = RulerWidget("horizontal")
+#        self.side_Ruler = RulerWidget("vertical")
+#        self.top_Ruler.setParent(self.graphics_view.viewport())
+#        self.side_Ruler.setParent(self.graphics_view.viewport())
+
         self._scene = TexGraphicsScene()
         self.tool_bar = VToolBar()
         self.toggle_menu = ToggleMenuWidget()
         scroll_widget = QWidget()
         scroll_layout = QHBoxLayout(scroll_widget)
+#        scroll_layout.addWidget(self.side_Ruler)
+#        scroll_layout.addWidget(self.top_Ruler)
         scroll_layout.addWidget(self.graphics_view)
         self.scroll_area = ZoomableScrollArea(scroll_widget)
         self.scroll_area.setWidget(scroll_widget)

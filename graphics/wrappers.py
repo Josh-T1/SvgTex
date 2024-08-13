@@ -1,6 +1,5 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Literal, overload
 from PyQt6.QtGui import QBrush, QColor, QMouseEvent, QPainter, QPainterPath, QPen, QKeyEvent, QTextCursor, QTransform
 from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, QLineF, QPointF, QSize, Qt, QRectF
 from PyQt6.QtSvg import QSvgGenerator, QSvgRenderer
@@ -9,8 +8,7 @@ from PyQt6.QtWidgets import (QGraphicsEllipseItem, QGraphicsItemGroup, QGraphics
 from ..utils import KeyCodes
 from abc import ABC, abstractmethod
 import re
-from copy import deepcopy
-from .transformations import transform_path
+from ..utils import transform_path
 
 
 def color_to_rgb(color: QColor):
@@ -163,20 +161,12 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
             self.setSharedRenderer(data)
         else:
             super().__init__()
-#    def svg_body(self) -> str:
-#        root = etree.fromstring(svg_document)
-#
-#        for g in root.findall('.//svg:g', namespaces=svg_namespace):
-#
-#            start = svg_doc.find("<svg")
-#            end = svg_doc.rfind("</svg>")
-#        pass
+
     def svg_body(self) -> str:
         """ Returns svg code representing the scene representation of the SvgItem, that can be directly imbeded into an SVG document """
         # alternative way. Get first path tag. Parse d attr get path. Map path from parent?
         if not self.svg_data:
             return ""
-
 
         # Transform svg item to reflect its scene position instead of relative position
         svg_doc = transform_path(self.svg_data.encode('utf-8'), self.transform())
@@ -222,9 +212,7 @@ class DeepCopyableEllipseItem(QGraphicsEllipseItem, DeepCopyableGraphicsItem):
         rect = self.rect()
         transform = self.sceneTransform()
         transform_svg = self.transform_to_svg(transform)
-        item_svg = f'<ellipse cx="{rect.center().x()}" cy="{rect.center().y()}" rx="{rect.width() / 2}" ry="{rect.height() / 2}" style="{pen_svg};{brush_svg}"'
-        item_svg += f' data-custom-type="DeepCopyableEllipseItem"/>'
-        pass
+        item_svg = f'<ellipse cx="{rect.center().x()}" cy="{rect.center().y()}" rx="{rect.width() / 2}" ry="{rect.height() / 2}" style="{pen_svg};{brush_svg}"/>'
 
         return (f'<g transform="{transform_svg}">\n'
                 f'{item_svg}\n'
@@ -258,8 +246,7 @@ class DeepCopyableRectItem(QGraphicsRectItem, DeepCopyableGraphicsItem):
         transform = self.sceneTransform()
         transform_svg = self.transform_to_svg(transform)
         item_svg = f'<rect x="{self.rect().x()}" y="{self.rect().y()}" width="{self.rect().width()}" height="{self.rect().height()}"'
-        item_svg += f' style="{pen_svg};{brush_svg}"'
-        item_svg += f' data-custom-type="DeepCopyableRectItem"/>'
+        item_svg += f' style="{pen_svg};{brush_svg}"/>'
 
         return (f'<g transform="{transform_svg}">\n'
                 f'{item_svg}\n'
@@ -293,8 +280,7 @@ class DeepCopyableLineItem(QGraphicsLineItem, DeepCopyableGraphicsItem):
         line = self.line()
         transform = self.sceneTransform()
         transform_svg = self.transform_to_svg(transform)
-        item_svg = f'<polyline points="{line.x1()} {line.y1()} {line.x2()} {line.y2()} " style="{pen_svg}"'
-        item_svg += ' data-custom-type="DeepCopyableLineItem"/>'
+        item_svg = f'<polyline points="{line.x1()} {line.y1()} {line.x2()} {line.y2()}" style="{pen_svg}"/>'
 
         return (f'<g transform="{transform_svg}">\n'
                 f'{item_svg}\n'
@@ -357,7 +343,6 @@ class DeepCopyablePathItem(QGraphicsPathItem, DeepCopyableGraphicsItem):
                 f'{path_element_svg}\n'
                 f'</g>\n')
 
-
     def __deepcopy__(self, memo) -> DeepCopyablePathItem:
         if (parent := self.parentItem()):
             new_path = parent.mapFromParent(self.path())
@@ -377,6 +362,7 @@ class ClippedTextItem(QGraphicsTextItem):
     """ Wrapper for QGraphicsTextItem that supports a 'clipped rect', where text outside of the rect bounds will not be displayed """
     def __init__(self, text: str, clip_rect: QRectF, parent=None):
         super().__init__(text, parent)
+        print(text, "clip text")
         self.text = text
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditable | Qt.TextInteractionFlag.TextSelectableByMouse
                                      | Qt.TextInteractionFlag.TextEditorInteraction)
@@ -391,7 +377,6 @@ class ClippedTextItem(QGraphicsTextItem):
         if painter is None: return
         if self.toPlainText().isspace():
             self.setPlainText(self.text)
-
         painter.setClipRect(self.clipRect)
         super().paint(painter, option, widget)
 
@@ -401,18 +386,20 @@ class ClippedTextItem(QGraphicsTextItem):
             self.setPlainText("")
 
 class DeepCopyableTextbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
-    default_message = "Text..."
+    # TODO: Allow for no clip rect
+    default_message = "Text.."
 
-    def __init__(self, rect: QRectF, parent=None):
+    def __init__(self, rect: QRectF, text=None, parent=None):
         super().__init__(rect, parent=parent)
         self.moving = False # move this logic into the tools module
-        self.text_item: ClippedTextItem = ClippedTextItem(self.default_message, self.rect(), parent=self)
+        _text = text if text is not None else self.default_message
+        self.text_item: ClippedTextItem = ClippedTextItem(_text, self.rect(), parent=self)
         self.moving_pen = QPen(Qt.GlobalColor.darkYellow)
         self.stationary_pen = QPen(Qt.GlobalColor.transparent)
-
-#        self.text_item.setFont(QFont("Times", 12))
         self.text_item.setTextWidth(rect.width())
         self.text_item.setPos(self.rect().topLeft())
+        # This is a temporary fix. When the item is copied and then added to scene the text does not appear. It seems that super().setRect(*args) in setRect() needs to be called for text to display...
+        self.setRect(self.rect())
 
 
     def setRect(self, *args, **kwargs):
@@ -470,16 +457,10 @@ class DeepCopyableTextbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
         rect = self.rect()
         transform = self.sceneTransform()
         transform_svg = self.transform_to_svg(transform)
-        item_svg = f'<text x="{rect.x()}" y="{rect.y()}" font-family="{font_item.family()}" font-size="{font_item.pointSize()}" fill="{color_to_rgb(self.text_item.defaultTextColor())}"'
-        item_svg += f' data-custom-type="DeepCopyableRectItem"'
-        item_svg += f' data-custom-params="({self.rect().width()}, {self.rect().height()}, {self.text()})">\n'
-        item_svg += f"   {self.text()}\n"
+        item_svg = f'<text x="{rect.x()}" y="{rect.y()}" font-family="{font_item.family()}" font-size="{font_item.pointSize()}"'
+        item_svg += f' data-custom-params="{self.rect().width()} {self.rect().height()}">\n'
+        item_svg += f"{self.text()}\n"
         item_svg += f'</text>'
-
-        for child in self.childItems():
-            if hasattr(child, "to_svg"):
-                child_to_svg = getattr(child, 'to_svg')
-                item_svg += "   " + child_to_svg()
 
         return (f'<g transform="{transform_svg}">\n'
                 f'{item_svg}\n'
@@ -488,8 +469,6 @@ class DeepCopyableTextbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
     def __deepcopy__(self, memo) -> DeepCopyableTextbox:
         rect_copy = QRectF(self.rect().x(), self.rect().y(), self.rect().width(), self.rect().height())
         new_item = DeepCopyableTextbox(rect_copy)
-        # This is a temporary fix. When the item is copied and then added to scene the text does not appear. It seems that super().setRect(*args) in setRect() needs to be called for text to display...
-        new_item.setRect(rect_copy)
         return new_item
 
 
