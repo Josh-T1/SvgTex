@@ -4,6 +4,7 @@ FILE_DIR_NAME="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$FILE_DIR_NAME")"
 VENV_DIR="$PROJECT_DIR/Venv"
 INTERPRETER_PATH="$VENV_DIR/$PROJECT_NAME/bin/python3"
+CURRENT_DIR="$(pwd)"
 
 full_path=""
 while [[ "$#" -gt 0 ]]; do
@@ -25,7 +26,8 @@ fi
 
 cd "$PROJECT_DIR"
 if [[ -n "$full_path" ]]; then
-    "$INTERPRETER_PATH" -m "$PROJECT_NAME.main_cli" "--file" "$full_path"
+    "$INTERPRETER_PATH" -m "$PROJECT_NAME.cli" "--file" "$full_path"
 else
-    "$INTERPRETER_PATH" -m "$PROJECT_NAME.main_cli"
+    "$INTERPRETER_PATH" -m "$PROJECT_NAME.cli"
 fi
+cd "$CURRENT_DIR"

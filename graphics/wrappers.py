@@ -61,10 +61,12 @@ class DeepCopyableGraphicsItem(QGraphicsItem):
 
     def brush_to_svg(self, brush: QBrush):
         brush_style = brush.style()
+        print(brush_style)
         color = brush.color()
 
         if brush_style == Qt.BrushStyle.SolidPattern:
             svg = f'fill:rgb({color.red()}, {color.green()}, {color.blue()});fill-opacity:{color.alpha() / 255.0}'
+            print(svg, "Brush svg")
         elif brush_style == Qt.BrushStyle.Dense1Pattern:
             svg = f'fill:url(#dense1Pattern)'
         elif brush_style == Qt.BrushStyle.Dense2Pattern:
@@ -249,7 +251,7 @@ class DeepCopyableRectItem(QGraphicsRectItem, DeepCopyableGraphicsItem):
         item_svg += f' style="{pen_svg};{brush_svg}"/>'
 
         return (f'<g transform="{transform_svg}">\n'
-                f'{item_svg}\n'
+                f'  {item_svg}\n'
                 f'</g>\n')
 
 
@@ -283,7 +285,7 @@ class DeepCopyableLineItem(QGraphicsLineItem, DeepCopyableGraphicsItem):
         item_svg = f'<polyline points="{line.x1()} {line.y1()} {line.x2()} {line.y2()}" style="{pen_svg}"/>'
 
         return (f'<g transform="{transform_svg}">\n'
-                f'{item_svg}\n'
+                f'  {item_svg}\n'
                 f'</g>\n')
 
     def __deepcopy__(self, memo) -> DeepCopyableLineItem:
@@ -319,7 +321,6 @@ class DeepCopyablePathItem(QGraphicsPathItem, DeepCopyableGraphicsItem):
         painter.begin(svg_gen)
         painter.setTransform(self.transform(), True)
         painter.drawPath(self.path())
-
         painter.end()
         buffer.seek(0)
         byte_svg = buffer.data().data()
@@ -335,12 +336,14 @@ class DeepCopyablePathItem(QGraphicsPathItem, DeepCopyableGraphicsItem):
     def to_svg(self) -> str:
         pen_svg = self.pen_to_svg(self.pen())
         brush_svg = self.brush_to_svg(self.brush())
+        print(self.brush().style(), "brush style")
+        print(brush_svg, "BRUSH SVG")
         path_svg = self._path_to_svg()
         path_element_svg = f'<path style="{pen_svg};{brush_svg}" d="{path_svg}"/>'
         transform = self.sceneTransform()
         transform_svg = self.transform_to_svg(transform)
         return (f'<g transform="{transform_svg}">\n'
-                f'{path_element_svg}\n'
+                f'  {path_element_svg}\n'
                 f'</g>\n')
 
     def __deepcopy__(self, memo) -> DeepCopyablePathItem:
@@ -351,6 +354,7 @@ class DeepCopyablePathItem(QGraphicsPathItem, DeepCopyableGraphicsItem):
         new_item = DeepCopyablePathItem(new_path)
         new_item.setTransform(self.transform())
         new_item.setPen(self.pen())
+
         new_item.setBrush(self.brush())
         new_item.setOpacity(self.opacity())
         new_item.setZValue(self.zValue())
@@ -463,7 +467,7 @@ class DeepCopyableTextbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
         item_svg += f'</text>'
 
         return (f'<g transform="{transform_svg}">\n'
-                f'{item_svg}\n'
+                f'  {item_svg}\n'
                 f'</g>\n')
 
     def __deepcopy__(self, memo) -> DeepCopyableTextbox:
@@ -497,9 +501,5 @@ class DeepCopyableItemGroup(QGraphicsItemGroup, DeepCopyableGraphicsItem):
                 item_svg += to_svg() + '\n'
 
         return (f'<g transform="{transform_svg}">\n'
-                f'{item_svg}\n'
-                f'</g>\n'
-                )
-
-
-
+                f'  {item_svg}\n'
+                f'</g>\n')

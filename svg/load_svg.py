@@ -10,10 +10,13 @@ from ..graphics import (DeepCopyableEllipseItem, DeepCopyableGraphicsItem, DeepC
 from pathlib import Path
 from ..utils import build_transform, transform_path
 
-
-def parse_d_attribute(d_attr: str) -> QPainterPath:
+def parse_d_attribute(d_attr: str, scale: tuple[float, float] = (1, 1)) -> QPainterPath:
+    """ Parses d attribute belonging to an svg path tag
+    returns: painter path object
+    TODO: Currently only 'simple' paths are parsed. We do not handle arcs or relative commands
+        """
     path = QPainterPath()
-
+    scale_x, scale_y = scale
     commands = re.findall(r'[MLCZQz]|-?\d+\.?\d*', d_attr)
     i = 0
     while i < len(commands):
@@ -22,47 +25,47 @@ def parse_d_attribute(d_attr: str) -> QPainterPath:
         if cmd == 'M':
             # Move to
             i += 1
-            x, y = float(commands[i]), float(commands[i+1])
+            x, y = float(commands[i]) * scale_x, float(commands[i+1]) * scale_y
             path.moveTo(x, y)
             i += 2
-#            print(cmd, x, y)
 
         elif cmd == 'L':
             # Line to
             i += 1
-            x, y = float(commands[i]), float(commands[i+1])
+            x, y = float(commands[i]) * scale_x, float(commands[i+1]) * scale_y
             path.lineTo(x, y)
             i += 2
-#            print(cmd, x, y)
         elif cmd == 'C':
             # Cubic Bezier curve
             i += 1
-            x1, y1 = float(commands[i]), float(commands[i+1])
-            x2, y2 = float(commands[i+2]), float(commands[i+3])
-            x3, y3 = float(commands[i+4]), float(commands[i+5])
+            x1, y1 = float(commands[i])* scale_x, float(commands[i+1]) * scale_y
+            x2, y2 = float(commands[i+2]) * scale_x, float(commands[i+3]) * scale_y
+            x3, y3 = float(commands[i+4]) * scale_x, float(commands[i+5]) * scale_y
             path.cubicTo(x1, y1, x2, y2, x3, y3)
             i += 6
-#            print(cmd, x1, y1, x2, y2, x3, y3)
         elif cmd == 'Q':
             # Quadratic Bezier curve (absolute)
             i += 1
-            x1, y1 = float(commands[i]), float(commands[i+1])
-            x2, y2 = float(commands[i+2]), float(commands[i+3])
+            x1, y1 = float(commands[i]) * scale_x, float(commands[i+1]) * scale_y
+            x2, y2 = float(commands[i+2]) * scale_x, float(commands[i+3]) * scale_y
             path.quadTo(x1, y1, x2, y2)
-            current_pos = (x2, y2)
             i += 4
-#            print(cmd, x1, y1, x2, y2)
 
         elif cmd == 'Z' or cmd == 'z':
             # Close path
-#            print(cmd)
             path.closeSubpath()
             i += 1
         else:
             i += 1
     return path
 
-def parse_element_style(element, default: Dict[Literal["fill", "stroke", "stroke-width", "stroke-linecap"], Any] | None = None) -> tuple[QPen, QBrush]:
+
+def parse_element_style(element: etree._Element, default: Dict[Literal["fill", "stroke", "stroke-width", "stroke-linecap"], Any] | None = None) -> tuple[QPen, QBrush]:
+    """ parses element style attribute
+    element: etree._Element representation of svg document
+    default: any key value pairs set in dict will overide the default values
+    returns: QPen and QBrush from style attribute
+    """
     # Initialize default QPen and QBrush
     _defaults = {"fill": None, "stroke": "black", "stroke-width": None, "stroke-linecap": None}
     if default:
@@ -118,7 +121,18 @@ def parse_style(style: str):
 
         if key == 'fill':
             # Handle brush color
-            brush.setColor(QColor(value))
+            if "rgb" in value:
+                pattern = r'rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)|rgb\s*\(\s*(\d+)\s+(\d+)\s+(\d+)\s*\)'
+                match = re.match(pattern, value)
+                if match:
+        # Extract the captured groups, handling both formats
+                    if match.group(1) is not None:
+                        r, g, b = match.group(1), match.group(2), match.group(3)
+                    else:
+                        r, g, b = match.group(4), match.group(5), match.group(6)
+                    brush = QBrush(QColor(int(r), int(g), int(b)))
+                    print(brush.color().red(), "RED")
+
         elif key == 'stroke':
             # Handle pen color
             pen.setColor(QColor(value))
@@ -138,6 +152,12 @@ def parse_style(style: str):
     return pen, brush
 
 class SvgBuilder:
+    """ Class for building a scene with selectable items from svg document
+    TODO: 1.finsish writing docu
+          2. Fix parse defs
+          3. Fix parse patterns
+          4. Fix load svg
+    """
     def __init__(self, source: Path | bytes):
         self.svg_namespace = {'svg': 'http://www.w3.org/2000/svg'}
 
@@ -146,7 +166,8 @@ class SvgBuilder:
                 self.source = file.read()
         else:
             self.source = source
-
+        self.mode: Literal["normal", "defs"] = "normal"
+        self.viewbox_scale = None
         self.root = etree.fromstring(self.source)
         self.fallback_mappings = []
         self.func_map = {"rect": self.build_rect,
@@ -172,15 +193,17 @@ class SvgBuilder:
             return True
         return False
 
-    def build_scene_items(self):
+
+    def build_scene_items(self, viewbox_width: float, viewbox_height: float):
+        doc_viewbox_width = float(self.root.attrib["viewBox"].split(" ")[-2])
+        doc_viewbox_height = float(self.root.attrib["viewBox"].split(" ")[-1])
+
+        viewbox_scale_x = doc_viewbox_height / viewbox_height
+        viewbox_scale_y = doc_viewbox_width / viewbox_width
+
+        self.viewbox_scale = (viewbox_scale_x, viewbox_scale_y)
 #        print(etree.tostring(self.root, encoding='utf-8', pretty_print=True))
         scene_items = []
-        doc_viewbox = self.root.attrib["viewBox"]
-        x, y, width, height = [float(num) for num in doc_viewbox.split(" ")]
-#        scale_x = width / viewbox.width()
-#        scale_y = height / viewbox.height()
-#        print(scale_x, scale_y)
-#        doc_transform = QTransform().scale(scale_x, scale_y)
         elements = self.root.findall('.//*', namespaces=self.svg_namespace)
         outer_elements = [e for e in elements if self.is_child_to("svg", e)]
         for outer_element in outer_elements:
@@ -194,12 +217,20 @@ class SvgBuilder:
         for e in immediate_children:
             if isinstance(e, etree._Comment):
                 continue
-            if (id := e.attrib.get("id", None)):
-                defs[id] = e
-            if self.element_name(e) == "use":
-                self.parse_use_element(e, parent_attr, parent_transform, defs)
+            elif (id := e.attrib.get("id", None)) is not None and self.element_name(e) != "use":
+                element_transform = e.attrib.get("transform", None)
+                element_transform = self.combine_parent_child_transform(element_transform, parent_transform)
+                element_attr = parent_attr | dict(e.attrib)
+                defs[id] = (e, element_attr, element_transform)
 
-            if self.element_name(e) not in self.func_map.keys():
+            elif self.element_name(e) == "use":
+                if (id := e.attrib.get("id", None)) is not None:
+                    if defs.get(id, None) is not None:
+                        element, def_parent_attr, def_parent_transform = defs[id]
+                        self.parse_element(element, def_parent_attr, def_parent_transform)
+
+
+            elif self.element_name(e) not in self.func_map.keys():
                 self.parse_defs_element(e, parent_attr, parent_transform)
         return defs
 
@@ -209,13 +240,12 @@ class SvgBuilder:
         defs = {}
         element_transform = element.attrib.get("transform", None)
         element_transform = self.combine_parent_child_transform(element_transform, parent_transform)
-        element_attr = parent_attr
+#        element_attr = parent_attr
+        element_attr = parent_attr | dict(element.attrib)
 
-        if self.element_name(element) == "g":
-            element_attr = parent_attr | dict(element.attrib)
-
+#        if self.element_name(element) == "g":
+#            element_attr = parent_attr | dict(element.attrib)
         for e in element:
-            print(e)
             if isinstance(e, etree._Comment):
                 continue
             if self.element_name(e) == "defs":
@@ -229,26 +259,30 @@ class SvgBuilder:
                 continue
             elif self.element_name(e) == "use":
                 # Check if item was define in def tags
+                print("USE")
                 element_id = None
                 for k, v in e.attrib.items():
                     if k.endswith("href"):
                         element_id = v[1:] # remove starting '#'
                 if element_id is None: continue
-                def_item = defs.get(element_id, None)
+                defs_item_tuple = defs.get(element_id, None)
+                if defs_item_tuple is None:
+                    continue
+                defs_item, defs_item_attr, defs_item_transform = defs_item_tuple
 
-                if isinstance(def_item, etree._Element):
-                    func = self.func_map.get(self.element_name(def_item))
+                if isinstance(defs_item, etree._Element):
+                    func = self.func_map.get(self.element_name(defs_item))
                     # Check if element is scene element
                     if func:
                         # use tag can define transform which is applied after transform specified in defs tag
                         use_transform = e.attrib.get("transform", None)
+                        print(use_transform)
                         use_transform = self.combine_parent_child_transform(use_transform, element_transform)
+                        print(DeepCopyableGraphicsItem.transform_to_svg(use_transform))
+                        print(defs_item_transform)
                         # Defined element attributes default to those defined in use tag
-                        for k, v in e.attrib.items():
-                            if k == "transform":
-                                continue
-                            def_item.attrib[k] = v
-                        item = func(def_item, element_attr, use_transform)
+                        defs_item_attr = element_attr | defs_item_attr
+                        item = func(defs_item, defs_item_attr, use_transform)
                         if item:
                             e_items.append(item)
                 continue
@@ -263,26 +297,7 @@ class SvgBuilder:
                 e_items.append(item)
         return e_items
 
-    def parse_use_element(self, use_element, parent_attrs, parent_transform, defs: dict) -> DeepCopyableGraphicsItem | None:
-        # Check if item was define in def tags
-        if (id := use_element.attrib.get("id", None)):
-            if (def_item := defs.get(id, None)):
-                func = self.func_map.get(self.element_name(def_item))
-                # Check if element is scene element
-                if func is None:
-                    return None
 
-                # use tag can define transform which is applied after transform specified in defs tag
-                use_transform = use_element.attrib.get("transform", None)
-                use_transform = self.combine_parent_child_transform(use_transform, parent_transform)
-                # Defined element attributes default to those defined in use tag
-                for k, v in use_element.attrib.items():
-                    if k == "transform":
-                        continue
-                    def_item.attrib[k] = v
-                item = func(def_item, parent_attrs, use_transform)
-                return item
-        return None
 
     def element_name(self, element: etree._Element) -> str:
         """ Returns element name from element """
@@ -336,6 +351,7 @@ class SvgBuilder:
 
         rect_item = DeepCopyableRectItem(x, y, width, height)
         rect_item.setPen(pen)
+        rect_item.setBrush(QColor(255, 0, 0))
         rect_item.setBrush(brush)
         if transform:
             rect_item.setTransform(transform)
@@ -353,12 +369,15 @@ class SvgBuilder:
         else:
             pen, brush = parse_style(style)
 
-        path = parse_d_attribute(path_str)
+        if self.viewbox_scale is not None:
+            path = parse_d_attribute(path_str, scale=self.viewbox_scale)
+        else:
+            path = parse_d_attribute(path_str)
+
         path_svg = DeepCopyablePathItem(path)
         if transform:
-            print(DeepCopyableGraphicsItem.transform_to_svg(transform))
+            print(DeepCopyableGraphicsItem.transform_to_svg(transform), "TTT")
             path_svg.setTransform(transform)
-
         path_svg.setPen(pen)
         path_svg.setBrush(brush)
         return path_svg
@@ -413,3 +432,24 @@ class SvgBuilder:
             textbox_svg.setTransform(transform)
         textbox_svg.setPen(pen)
         return textbox_svg
+
+#    def parse_use_element(self, use_element, parent_attrs, parent_transform, defs: dict) -> DeepCopyableGraphicsItem | None:
+#        # Check if item was define in def tags
+#        if (id := use_element.attrib.get("id", None)):
+#            if (def_item := defs.get(id, None)):
+#                func = self.func_map.get(self.element_name(def_item))
+#                # Check if element is scene element
+#                if func is None:
+#                    return None
+#
+#                # use tag can define transform which is applied after transform specified in defs tag
+#                use_transform = use_element.attrib.get("transform", None)
+#                use_transform = self.combine_parent_child_transform(use_transform, parent_transform)
+#                # Defined element attributes default to those defined in use tag
+#                for k, v in use_element.attrib.items():
+#                    if k == "transform":
+#                        continue
+#                    def_item.attrib[k] = v
+#                item = func(def_item, parent_attrs, use_transform)
+#                return item
+#        return None

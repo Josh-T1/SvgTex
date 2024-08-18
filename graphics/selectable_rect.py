@@ -50,6 +50,7 @@ class SelectableRectItem(QGraphicsItem):
     def item(self, item: DeepCopyableGraphicsItem):
         self._item = item
         self._item.setParentItem(self)
+        print(self._item.parentItem(), "parent")
         self.transformation_handlers: list[TransformationHandler] = self._register_transformation_handlers()
         if hasattr(item, 'to_svg'):
             self.__setattr__('to_svg', getattr(item, 'to_svg'))

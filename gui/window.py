@@ -2,12 +2,14 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import Literal
 from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QColor, QCursor, QGuiApplication, QIcon, QKeyEvent, QKeySequence, QMouseEvent, QPaintEvent, QPen, QPainter, QPixmap, QTransform
-from PyQt6.QtCore import QByteArray, QKeyCombination, QPointF, QRect, Qt, QRectF, pyqtSignal, QEvent, QSize
+from PyQt6.QtCore import QByteArray, QKeyCombination, QPointF, QRect, Qt, QRectF, pyqtBoundSignal, pyqtSignal, QEvent, QSize
 from PyQt6.QtSvg import QSvgGenerator, QSvgRenderer
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel,
                              QMessageBox, QPinchGesture, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                              QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem, QGraphicsRectItem)
+
+from ..graphics.wrappers import DeepCopyableRectItem
 
 from ..drawing.drawing_controller import DrawingController
 from ..graphics import DeepCopyableSvgItem, StoringQSvgRenderer, DeepCopyableTextbox, SelectableRectItem, DeepCopyableItemGroup
@@ -203,53 +205,76 @@ class TexGraphicsScene(QGraphicsScene):
             self.cache.popleft()
         self.cache.append(item)
 
-    def compile_latex(self):
+    def compile_latex(self, signal):
         for item in self.items():
             parent = item.parentItem()
             if not isinstance(item, DeepCopyableTextbox) or not isinstance(parent, SelectableRectItem):
                 continue
 
             res_item = self.attempt_compile(item.text())
-
+#
             if res_item is not None:
                 global_pos = item.mapToScene(item.boundingRect().topLeft())# - parent.pos()
 #                res_item.setTransform(QTransform().translate(global_pos.x(), global_pos.y()))
+#                res_item.setPos(global_pos.x(), global_pos.y())
 
-                res_item.setPos(global_pos.x(), global_pos.y())
-                res_item.setTransform(QTransform().scale(0.0025, -0.0025))
-                selectable_item = SelectableRectItem(res_item)
 
-#                self.addItem(res_item)
-                self.addItem(selectable_item)
-                print(selectable_item.boundingRect())
-#                parent.item = res_item
+                parent.item = res_item
+#                res_item.setPos(global_pos.x(), global_pos.y())
+#                parent.setTransform(QTransform().scale(0.16, -0.16))
                 item.setParentItem(None)
-                self.removeItem(parent)
                 self.removeItem(item)
                 del item
+
 
     def attempt_compile(self, text):
         if not text_is_latex(text):
             return None
+
         svg_bytes = tex2svg(text)
-        if not svg_bytes:
-            return
-        # parse document and make SVg GroupItem
-#        svg_data = QByteArray(svg_bytes.read())
+        if svg_bytes is None: return None
+
+        scene_rect = self.sceneRect()
+        viewbox_width, viewbox_height = scene_rect.width(), scene_rect.height()
+        viewbox_width_px = viewbox_width
+        viewbox_height_px = viewbox_height
 
         builder = SvgBuilder(svg_bytes.read())
-        svg_items = builder.build_scene_items()
+        svg_items = builder.build_scene_items(viewbox_width_px, viewbox_height_px)
         if len(svg_items) == 0: return None
         if len(svg_items) > 1:
             svg_items = svg_items[1:] # hack solution. First element is always a 'patch path' whatever that means
-#        group = DeepCopyableItemGroup()
-#        for item in svg_items:
-#            group.addToGroup(item)
-#        group.addItem(svg_items[0])
-#        renderer = StoringQSvgRenderer(group)
-#        item = DeepCopyableSvgItem(renderer)
+        item = svg_items[0]
+        svg_bytes.seek(0)
+#        text = svg_bytes.read().decode('utf-8')
+#        print(text)
+#        svg_data = QByteArray(svg_bytes.read())
+#        renderer = StoringQSvgRenderer(svg_data)
+#        item = DeepCopyableSvgItem()
 #        item.setSharedRenderer(renderer)
-        return svg_items[0]
+        return item
+
+#    def attempt_compile(self, text):
+#        if not text_is_latex(text):
+#            return None
+#        svg_bytes = tex2svg(text)
+#        if not svg_bytes:
+#            return
+        # parse document and make SVg GroupItem
+#        svg_data = QByteArray(svg_bytes.read())
+#        renderer = QSvgRenderer(svg_data)
+#        svg_item = QGraphicsSvgItem()
+#        svg_item.setSharedRenderer(renderer)
+#        builder = SvgBuilder(svg_bytes.read())
+#        svg_items = builder.build_scene_items()
+#        if len(svg_items) == 0: return None
+#        if len(svg_items) > 1:
+#            svg_items = svg_items[1:] # hack solution. First element is always a 'patch path' whatever that means
+#        renderer = StoringQSvgRenderer(svg_data)
+#        item = DeepCopyableSvgItem()
+#        item.setSharedRenderer(renderer)
+#        return svg_item
+#        return item
 
 class IntBox(QWidget):
     clicked = pyqtSignal(int)
@@ -688,8 +713,9 @@ class MainWindow(QMainWindow):
     def load_svg(self, file_path: str, scale=0.5):
         """ TODO """
 #        svg_item = DeepCopyableSvgItem(file_path)
+        scene_rect = self._scene.sceneRect()
         builder = SvgBuilder(Path(file_path))
-        svg_items = builder.build_scene_items()
+        svg_items = builder.build_scene_items(scene_rect.width(), scene_rect.height())
         cont = self.graphics_view.controller()
         if cont:
             handler = cont.handler
@@ -702,6 +728,8 @@ class MainWindow(QMainWindow):
             svg_item.setFlag(QGraphicsSvgItem.GraphicsItemFlag.ItemClipsToShape, True) # Make background transparent
             if signal:
                 selectable_item = SelectableRectItem(svg_item, signal) # TODO
+#                print(svg_item.brush().color().red())
+#                selectable_item.setBrush(QColor(255, 0, 0))
             else:
                 selectable_item = SelectableRectItem(svg_item) # TODO
             #selectable_item.setScale(scale) # TODO determine scale based on width relative to window width, height width
@@ -730,12 +758,20 @@ class MainWindow(QMainWindow):
         scene_pos = self.graphics_view.mapToScene(view_pos)
         return QPointF(scene_pos.x(), scene_pos.y())
 
+    def get_handeler_signal(self) -> pyqtBoundSignal | None:
+        signal = None
+        cont = self.graphics_view.controller()
+        if cont:
+            signal = cont.handler_signal
+        return signal
+
     def set_default_shortcuts(self):
         def call_click(button_name):
             func = self.tool_bar.getClickCallback(button_name)
             if callable(func):
                 func()
             return
+
         shortcuts = [
                 (Qt.Key.Key_F, lambda: call_click(str(Handlers.Freehand.name)), "Freehand", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
                 (Qt.Key.Key_L, lambda: call_click(str(Handlers.Line.name)), "Line", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
@@ -743,7 +779,7 @@ class MainWindow(QMainWindow):
                 (Qt.Key.Key_R, lambda: call_click(str(Handlers.Rect.name)), "Rect", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
                 (Qt.Key.Key_P, lambda: call_click(str(Handlers.Fill.name)), "Pain", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
                 (Qt.Key.Key_S, lambda: call_click(str(Handlers.Selector.name)), "Selector", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
-                (Qt.Key.Key_C, lambda: self._scene.compile_latex(), "Compile latex", {"modifiers": Qt.KeyboardModifier.ShiftModifier}),
+                (Qt.Key.Key_C, lambda: self._scene.compile_latex(self.get_handeler_signal()), "Compile latex", {"modifiers": Qt.KeyboardModifier.ShiftModifier}),
                 (Qt.Key.Key_N, lambda: SelectableRectItem.cycle(self.get_cursor_pos()), "Cycle selectable items under curosr", {"modifiers": Qt.KeyboardModifier.MetaModifier}),
                 (Qt.Key.Key_C, self._scene.copy_to_clipboard, "Copy item", {"modifiers": Qt.KeyboardModifier.ControlModifier}),
                 (Qt.Key.Key_V, lambda: self._scene.paste_from_clipboard(self.get_cursor_pos()), "Paste item", {"modifiers": Qt.KeyboardModifier.ControlModifier}),
