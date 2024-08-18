@@ -152,6 +152,8 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
 
     def __init__(self, data: None | StoringQSvgRenderer | str = None, parent=None):
         self.svg_data = None
+        self.xml_info = {}
+        self.doctype_info = {}
 
         if isinstance(data, str):
             if not Path(data).is_file(): raise ValueError(f"Invalid path: {data}")
@@ -169,18 +171,32 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
         # alternative way. Get first path tag. Parse d attr get path. Map path from parent?
         if not self.svg_data:
             return ""
+        body = self.svg_data
 
+
+        xml_declaration_pattern_contents = r'<\?xml\s+version="([^"]+)"\s+encoding="([^"]+)"\s+standalone="([^"]+)"\?>'
+        doctype_pattern_contents = r'<!DOCTYPE\s+svg\s+PUBLIC\s+"([^"]+)"\s+"([^"]+)">'
+        xml_declaration_match = re.search(xml_declaration_pattern_contents, self.svg_data)
+        doctype_match = re.search(doctype_pattern_contents, self.svg_data)
+        if xml_declaration_match:
+            self.xml_info = {
+                'version': xml_declaration_match.group(1),
+                'encoding': xml_declaration_match.group(2),
+                'standalone': xml_declaration_match.group(3)
+            }
+
+        if doctype_match:
+            self.doctype_info = {
+                'public_id': doctype_match.group(1),
+                'system_id': doctype_match.group(2)
+            }
+
+        # remove xml declartion and doctype_pattern
+        xml_declaration_pattern = r'<\?xml[^>]*\?>'
+        doctype_pattern = r'<!DOCTYPE[^>]*>'
+        body = re.sub(xml_declaration_pattern, "", body)
+        body = re.sub(doctype_pattern, "", body)
         # Transform svg item to reflect its scene position instead of relative position
-        svg_doc = transform_path(self.svg_data.encode('utf-8'), self.transform())
-        start = svg_doc.find("<svg")
-        end = svg_doc.rfind("</svg>")
-
-
-        if start == -1 or end == -1:
-            raise ValueError("Invalid Svg format: no <svg> tags found")
-        # remove svg tags
-        body = re.sub(r'<svg\s+([^>]*)/?>', '', svg_doc[start:end])
-        body = body.replace("</svg>", "")
         return body
 
     def setSharedRenderer(self, renderer: StoringQSvgRenderer): # type: ignore
@@ -201,7 +217,19 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
         return svg_item
 
     def to_svg(self):
-        return self.svg_body()
+        transform_svg = self.transform_to_svg(self.sceneTransform())
+        body = self.svg_body()
+        xml_info = []
+        for k, v in self.xml_info.items():
+            xml_info.append(f' metadata-{k}="{v}"')
+        for k, v in self.doctype_info.items():
+            xml_info.append(f' metadata-{k}="{v}"')
+        info = "".join(xml_info)
+        return (f'<g transform="{transform_svg}" metadata-custom-type="DeepCopyableSvgItem" \n'
+                f'{info}>\n'
+                f'  {body}\n'
+                f'</g>\n'
+                )
 
 class DeepCopyableEllipseItem(QGraphicsEllipseItem, DeepCopyableGraphicsItem):
     """ Wrapper for QGraphicsEllipseItem that supports deepcopy """
@@ -336,8 +364,6 @@ class DeepCopyablePathItem(QGraphicsPathItem, DeepCopyableGraphicsItem):
     def to_svg(self) -> str:
         pen_svg = self.pen_to_svg(self.pen())
         brush_svg = self.brush_to_svg(self.brush())
-        print(self.brush().style(), "brush style")
-        print(brush_svg, "BRUSH SVG")
         path_svg = self._path_to_svg()
         path_element_svg = f'<path style="{pen_svg};{brush_svg}" d="{path_svg}"/>'
         transform = self.sceneTransform()
@@ -354,7 +380,6 @@ class DeepCopyablePathItem(QGraphicsPathItem, DeepCopyableGraphicsItem):
         new_item = DeepCopyablePathItem(new_path)
         new_item.setTransform(self.transform())
         new_item.setPen(self.pen())
-
         new_item.setBrush(self.brush())
         new_item.setOpacity(self.opacity())
         new_item.setZValue(self.zValue())

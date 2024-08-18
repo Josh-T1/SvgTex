@@ -9,6 +9,10 @@ from .wrappers import DeepCopyableGraphicsItem, DeepCopyableTextbox
 from collections import OrderedDict
 from copy import deepcopy
 
+"""
+"""
+
+
 class SelectableRectItem(QGraphicsItem):
     """ Selectable container for QGraphicsItems """
 
@@ -23,9 +27,12 @@ class SelectableRectItem(QGraphicsItem):
         self._item = None
 
         self.item = item
+        self.reflected_x = False
+        self.reflected_y = False
         self._id = id(self)
         self._transform = QTransform()
         self.setAcceptHoverEvents(True)
+
         self.select_signal = select_signal
         if select_signal:
             select_signal.connect(self._toggle_active)
@@ -68,7 +75,9 @@ class SelectableRectItem(QGraphicsItem):
         return self._transform
 
     def _register_transformation_handlers(self) -> list[TransformationHandler]:
+        """ """
         rotation_handler = RotationHandler(self.rotatingRectIcon, self)
+        # Since lines of reflection are orthogonal they commute and thus we may set the reflections in any order
         stretch_handler_top_right = ScaleHandler(self.topRightStretchIcon, self, self.item.boundingRect)
         stretch_handler_top_left = ScaleHandler(self.topLeftStretchIcon, self, self.item.boundingRect)
         stretch_handler_bottom_right = ScaleHandler(self.bottomRightStretchIcon, self, self.item.boundingRect)
@@ -111,6 +120,9 @@ class SelectableRectItem(QGraphicsItem):
     def setTransform(self, matrix: QTransform, combine=False) -> None:
         if round(matrix.determinant(), 3) != 1:
             self.item.setTransform(matrix, combine=combine)
+            # In this case we loose all reflection information. This accounts for the lost information
+            # Note: there may be other edge cases missing
+            print(self.sceneTransform())
         else:
             QGraphicsItem.setTransform(self, matrix, combine=combine)
         self._transform = matrix * self._transform

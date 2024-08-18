@@ -81,65 +81,26 @@ class RotationHandler(TransformationHandler):
         transform.translate(-center.x() , -center.y() )
         return transform
 
-class TestHandler(TransformationHandler):
-    def __init__(self, set_rect_callback, item: QGraphicsItem, bounding_rect_callback):
-        super().__init__(set_rect_callback, item)
-        self.bounding_rect_callback = bounding_rect_callback
-        self.mirror = 1
-    def handle_mouse_move(self, event):
-        pass
-
-    def handle_mouse_press(self, event):
-        if self.rect.contains(self.item.mapFromScene(event.scenePos())):
-            t = self.build_transform()
-            self.item.setTransform(t, combine=True)
-
-    def handle_mouse_release(self, event):
-        pass
-
-    def _get_corner(self, top: bool, left: bool):
-        bounding_rect = self.item.itemBoundingRect()
-        corners = [bounding_rect.topLeft(), bounding_rect.topRight(), bounding_rect.bottomLeft(), bounding_rect.bottomRight()]
-        corners = [(self.item.mapToScene(corner), corner) for corner in corners]
-        middle = self.item.mapToScene(QPointF(bounding_rect.left() + bounding_rect.width() / 2 -14 , bounding_rect.top() +  bounding_rect.height()/2 -14))
-        func_left = lambda x: x <= middle.x() if left else lambda x: x >= middle.x()
-        func_top = lambda y: y <= middle.y() if top else lambda y: y >= middle.y()
-        for corner_mapped, corner in corners:
-            if func_top(corner_mapped.y()) and func_left(corner_mapped.x()):
-                return  corner
-        return None
-
-    def build_transform(self):
-        transform = QTransform()
-
-        corner = self.item.mapFromScene(self._get_corner(True, True))
-        if corner is None:
-            return transform
-        transform.translate(corner.x(), corner.y())
-        transform.scale(1.2, 1)
-        transform.translate(-corner.x(), -corner.y())
-#        transform.translate(100, 0)
-#        relative_transform = self.item.sceneTransform().inverted()[0] * transform
-        return transform
-
 
 class ScaleHandler(TransformationHandler):
     """
     ScaleHandler handles all scaling of QGraphicsItems when the users cursor is inside its rectangle. This rectangle is passed in by means of a callback and
-    detects when mouse events are in the target area. This class needs to be delegated mouseEvents as they happen. Scaling of items occurs with the opposing diagonal
-    corner fixed (it is assumed the handler rect resides on a corner of item: QGraphicsItem).
+    detects when mouse events are in the rect area. This class needs to be delegated mouseEvents as they happen. Scaling of items occurs with the opposing diagonal
+    corner fixed.
 
     -- Limitations --
     1. We can not invert item. If you drag the top left corner towards the top right corner, you can not pass the top right corner. There is also glitching when you get close or the width of the image
     becomes tiny.
     """
-    def __init__(self, set_rect_callback: Callable[[], QRectF],item: QGraphicsItem, bounding_rect_callback: Callable[[], QRectF]):
+    def __init__(self, set_rect_callback: Callable[[],QRectF], item: QGraphicsItem, bounding_rect_callback: Callable[[], QRectF]):
         """
         -- Params --
         set_rect_callback: Callable that returns the QRectF object representing the QRectF in which the handler should implement its functionality
         item: QGraphicsItem wich is the target of the scaling
         bounding_rect_callback: Callable wich returns the QRectF object representing the bounding rectangle of self.item
         corner: of the form '(top/down)_(right/left)'. The corner of items's bounding rectangle on which handler rect resides.
+        reflected_x_callback: callback that returns true if the item has been reflected about the x axis
+        reflected_y_callback: callback that returns true if the item has been reflected about the y axis
         """
         super().__init__(set_rect_callback, item)
         self.bounding_rect_callback = bounding_rect_callback
@@ -156,7 +117,10 @@ class ScaleHandler(TransformationHandler):
         left = round(corner_center.x() - bounding_top_left.x(), 3) == 0
         return top, left
 
-    def local_corner(self):
+    def local_corner(self) -> tuple[bool, bool]:
+        """ Returns true for 'top' if the point this handler holds reference to is located on the top of the items bounding rect in scene coordinates
+        Similary returns true for 'left' if the point this handler holds reference to is located on the left of the items bounding rect in scene coordinates
+        """
         corner_center = self.item.mapToScene(self.set_rect_callback().topLeft())
         bounding_rect = self.item.mapRectToScene(self.item.boundingRect())
         middle = QPointF(bounding_rect.left() +7 + (bounding_rect.width()-14) / 2 , bounding_rect.top() +7 + (bounding_rect.height() -14) / 2 )
@@ -211,11 +175,14 @@ class ScaleHandler(TransformationHandler):
             self.item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
             self.stretching = False
 
-    def _get_corner(self, top: bool, left: bool):
+    def _get_corner(self, top: bool, left: bool) -> QPointF | None:
+        """ stationary corner refers the corner that stays inplace during scaling
+        top: true if stationary corner is on the top item relative to scene
+        left: true if stationary corner is on the left of item relative to scene
+        returns: stationary corner (QPointF) of item in its local coordinates
+        """
         bounding_rect = self.bounding_rect_callback()
-#        corners = [bounding_rect.topLeft() + QPointF(7, 7), bounding_rect.topRight() + QPointF(-7, 7), bounding_rect.bottomLeft() + QPointF(7, -7), bounding_rect.bottomRight() + QPointF(-7, -7)]
         corners = [bounding_rect.topLeft() , bounding_rect.topRight() , bounding_rect.bottomLeft() , bounding_rect.bottomRight() ]
-
         corners = [(self.item.mapToScene(corner), corner) for corner in corners]
         bounding_rect = self.item.mapRectToScene(bounding_rect)
         middle = QPointF(bounding_rect.left() +7 + (bounding_rect.width()-14) / 2 , bounding_rect.top() +7 + (bounding_rect.height() -14) / 2 )
@@ -227,15 +194,26 @@ class ScaleHandler(TransformationHandler):
             if top:
                 return y <= middle.y()
             return y >= middle.y()
-        for corner_mapped, corner in corners:
-            if top_f(corner_mapped.y()) and left_f(corner_mapped.x()):
-                return corner
+        for scene_corner, local_corner in corners:
+            if top_f(scene_corner.y()) and left_f(scene_corner.x()):
+                return local_corner
         return None
 
     def build_transform(self, x_scale_factor: float, y_scale_factor: float):
         """ Create QTransform required to scale item fixed to the opposing diagonal corner """
         top, left = self.local_corner()
         transform = QTransform()
+        # We determine orientation of object through its boundingRect however boundingRect
+        # holds no information pertaining to reflections. We check manually
+        reflected_about_x = self.item.sceneTransform().m11() < 0
+        reflected_about_y = self.item.sceneTransform().m22() < 0
+        if reflected_about_x:
+            print("not top")
+            left = not left
+        if reflected_about_y:
+            print("y reflect")
+            top = not top
+
         translate_center = self._get_corner(not top, not left)
         if translate_center is None:
             return transform
