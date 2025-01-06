@@ -4,13 +4,11 @@ from PyQt6.QtGui import QPen, QPainterPath, QTransform
 from PyQt6.QtCore import QPointF, Qt, pyqtBoundSignal, QRectF
 from PyQt6.QtWidgets import QGraphicsItem
 from ..drawing.transformation_handlers import RotationHandler, TransformationHandler, ScaleHandler
-from ..utils import Handlers
-from .wrappers import DeepCopyableGraphicsItem, DeepCopyableTextbox
+from ..utils import Handlers, Tools
+from .wrappers import DeepCopyableItemABC, DeepCopyableTextbox
 from collections import OrderedDict
 from copy import deepcopy
 
-"""
-"""
 
 
 class SelectableRectItem(QGraphicsItem):
@@ -21,11 +19,16 @@ class SelectableRectItem(QGraphicsItem):
     last_signal: str = ""
     selector_name: str | None = None
 
-    def __init__(self, item : DeepCopyableGraphicsItem, select_signal: pyqtBoundSignal | None = None):
+    def __init__(self, item : DeepCopyableItemABC, select_signal: pyqtBoundSignal | None = None, detection_size: int = 14):
+        """
+        item: SelectableRectItem acts as a selectable container for item
+        select_signal: bound signal that emits current handler name
+        detection_size: width of square in which mouse events are delegated to its corresponding handler
+        """
         super().__init__()
         self._pen = QPen(Qt.GlobalColor.darkBlue, 2, Qt.PenStyle.DashLine)
         self._item = None
-
+        self.detection_size = detection_size
         self.item = item
         self.reflected_x = False
         self.reflected_y = False
@@ -48,36 +51,25 @@ class SelectableRectItem(QGraphicsItem):
         self.selectableItems.move_to_end(self._id, last=True)
 
     @property
-    def item(self) -> DeepCopyableGraphicsItem:
+    def item(self) -> DeepCopyableItemABC:
         if not self._item:
             raise TypeError("I dont think this is even possible...")
         return self._item
 
     @item.setter
-    def item(self, item: DeepCopyableGraphicsItem):
+    def item(self, item: DeepCopyableItemABC):
         self._item = item
         self._item.setParentItem(self)
-        print(self._item.parentItem(), "parent")
         self.transformation_handlers: list[TransformationHandler] = self._register_transformation_handlers()
         if hasattr(item, 'to_svg'):
             self.__setattr__('to_svg', getattr(item, 'to_svg'))
 
-#    def to_svg(self):
-#        item_svg = ""
-#        if hasattr(self.item, "to_svg"):
-#            to_svg = getattr(self.item, "to_svg")
-#            item_svg = "    " + to_svg()
-#        transform_svg = DeepCopyableGraphicsItem.transform_to_svg(self.transform())
-#        return (f'<g transform="{transform_svg}"\n'
-#                f'{item_svg}\n'
-#                f'</g>\n')
     def transform(self):
         return self._transform
 
     def _register_transformation_handlers(self) -> list[TransformationHandler]:
         """ """
         rotation_handler = RotationHandler(self.rotatingRectIcon, self)
-        # Since lines of reflection are orthogonal they commute and thus we may set the reflections in any order
         stretch_handler_top_right = ScaleHandler(self.topRightStretchIcon, self, self.item.boundingRect)
         stretch_handler_top_left = ScaleHandler(self.topLeftStretchIcon, self, self.item.boundingRect)
         stretch_handler_bottom_right = ScaleHandler(self.bottomRightStretchIcon, self, self.item.boundingRect)
@@ -86,10 +78,10 @@ class SelectableRectItem(QGraphicsItem):
                 stretch_handler_bottom_right, stretch_handler_bottom_left,
                 ]
 
-    def setFlag(self, *args):
+    def setFlag(self, flag, enabled: bool=True):
         if isinstance(self.item, DeepCopyableTextbox):
-            self.item.setFlag(*args)
-        super().setFlag(*args)
+            self.item.setFlag(flag, enabled)
+        super().setFlag(flag, enabled)
 
 
     def sceneTransform(self):
@@ -108,7 +100,7 @@ class SelectableRectItem(QGraphicsItem):
                 item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
                 item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
                 cls.selector_name = name
-            elif name == Handlers.Fill.value:
+            elif name == Tools.Brush.value or name == Tools.Pen.value:
                 item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
                 item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
                 cls.selector_name = name
@@ -120,16 +112,13 @@ class SelectableRectItem(QGraphicsItem):
     def setTransform(self, matrix: QTransform, combine=False) -> None:
         if round(matrix.determinant(), 3) != 1:
             self.item.setTransform(matrix, combine=combine)
-            # In this case we loose all reflection information. This accounts for the lost information
-            # Note: there may be other edge cases missing
-            print(self.sceneTransform())
         else:
             QGraphicsItem.setTransform(self, matrix, combine=combine)
         self._transform = matrix * self._transform
         self.prepareGeometryChange()
         self.update()
 
-    def shape(self):
+    def bounding_path(self):
         path = QPainterPath()
         path.addRect(self.itemBoundingRect())
         for handler in self.transformation_handlers:
@@ -145,7 +134,6 @@ class SelectableRectItem(QGraphicsItem):
         height = max(min_height, bounding_rect.height())
         x_offset = 10 if width == min_width else 0
         y_offset = 10 if height == min_height else 0
-
         rect = QRectF(bounding_rect.x() - x_offset, bounding_rect.y() - y_offset, width,height)
         path.addRect(rect)
         return self.item.transform().map(path).boundingRect()
@@ -156,14 +144,14 @@ class SelectableRectItem(QGraphicsItem):
     def mouseMoveEvent(self, event) -> None:
         self.prepareGeometryChange()
         self.update()
-        if self.selector_name == Handlers.Fill.value:
+        if self.selector_name == Tools.Brush.value or self.selector_name == Tools.Pen.value:
             return
         for handler in self.transformation_handlers:
             handler.handle_mouse_move(event)
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event) -> None:
-        if self.selector_name == Handlers.Fill.value:
+        if self.selector_name == Tools.Brush.value or self.selector_name == Tools.Pen.value:
             return
         for handler in self.transformation_handlers:
             handler.handle_mouse_press(event)
@@ -176,7 +164,7 @@ class SelectableRectItem(QGraphicsItem):
 
     # TODO: Match args to abstract class
     def paint(self, painter, option, widget) -> None:
-        if self.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsSelectable == 0:
+        if self.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsSelectable == 0 or painter is None:
             return
 
         self.setZValue(self.scene_order())
@@ -187,7 +175,7 @@ class SelectableRectItem(QGraphicsItem):
                 return
 
             for handler in self.transformation_handlers:
-                painter.drawRect(handler.rect) # Make this dynamic... handler should implement paint?
+                painter.drawRect(handler.rect)
 
     def setBrush(self, *args):
         method = getattr(self.item, "setBrush", None)
@@ -266,13 +254,14 @@ class SelectableRectItem(QGraphicsItem):
             item.setSelected(False)
             item.setAcceptHoverEvents(False)
 
-        values = list(sorted([item.zValue() for item in items_under_cursor]))
+        values = list(sorted([item.zValue() for item in items_under_cursor], reverse=True))
         for item in items_under_cursor:
             old_index = values.index(item.zValue())
             new_index = (old_index + 1) % len(values)
             item.setZValue(values[new_index])
-            if values[new_index] == values[-1]:
+            if values[new_index] == values[0]:
                 item.setSelected(True)
+                item.setAcceptHoverEvents(True)
         # Enable selection behaviour. The item with the greatest z value will become selected by default
         for item in items_under_cursor:
             item.setAcceptHoverEvents(True)

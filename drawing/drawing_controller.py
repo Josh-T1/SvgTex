@@ -1,8 +1,8 @@
-from PyQt6.QtGui import QBrush, QColor, QKeyEvent, QMouseEvent, QPen, QPainterPath
+from PyQt6.QtGui import QBrush, QColor, QKeyEvent, QKeySequence, QMouseEvent, QPen, QPainterPath, QShortcut
 from PyQt6.QtCore import QObject, Qt, pyqtBoundSignal, pyqtSignal,  QRectF
 from PyQt6.QtWidgets import (QGraphicsPathItem, QGraphicsView, QGraphicsScene, QGraphicsLineItem)
-from ..drawing.tools import EllipseDrawingHandler, FillPaintHandler, DrawingHandler, LineDrawingHandler, PaintHandler, RectDrawingHandler, TextboxDrawingHandler, FreeHandDrawingHandler, NullDrawingHandler
-from ..utils import Handlers
+from ..drawing.tools import ArrowDrawingHandler, ConnectedLineHandler, EllipseDrawingHandler, BrushTool, DrawingHandler, LineDrawingHandler, ToolProtocol, PenTool, RectDrawingHandler, TextboxDrawingHandler, FreeHandDrawingHandler, NullDrawingHandler
+from ..utils import Handlers, Tools
 
 class DrawingController(QObject):
     """
@@ -12,7 +12,7 @@ class DrawingController(QObject):
     """
 
     handler_signal = pyqtSignal(str)
-    def __init__(self, handler: DrawingHandler | PaintHandler | None = None,
+    def __init__(self, handler: DrawingHandler | ToolProtocol | None = None,
                  scene_view: QGraphicsView | None = None,
                  pen: QPen | None = None,
                  brush: QBrush | None = None
@@ -27,20 +27,28 @@ class DrawingController(QObject):
         self.handler = handler if handler is not None else NullDrawingHandler(handler_signal=self.handler_signal)
         self.pen = pen if pen is not None else QPen(Qt.GlobalColor.black)
         self.brush = brush if brush is not None else QBrush(Qt.GlobalColor.black)
-        self.name_to_classname_mapping = {Handlers.Line.value: LineDrawingHandler,
-                                          Handlers.Freehand.value: FreeHandDrawingHandler,
-                                          Handlers.Selector.value: NullDrawingHandler,
-                                          Handlers.Textbox.value: TextboxDrawingHandler,
-                                          Handlers.Rect.value: RectDrawingHandler,
-                                          Handlers.Ellipse.value: EllipseDrawingHandler,
-                                          Handlers.Fill.value: FillPaintHandler,
+        self.name_to_classname_mapping = {Handlers.Line.name: LineDrawingHandler,
+                                          Handlers.Freehand.name: FreeHandDrawingHandler,
+                                          Handlers.Selector.name: NullDrawingHandler,
+                                          Handlers.Textbox.name: TextboxDrawingHandler,
+                                          Handlers.Rect.name: RectDrawingHandler,
+                                          Handlers.Ellipse.name: EllipseDrawingHandler,
+                                          Handlers.Arrow.name: ArrowDrawingHandler,
+                                          Handlers.ConnectedLine.name: ConnectedLineHandler,
+                                          Tools.Brush.name: BrushTool,
+                                          Tools.Pen.name: PenTool,
+
                                           }
 
 
     def mousePressEvent(self, event: QMouseEvent):
-        if self.handler and self.scene_view and self.pen:
+        if self.handler and self.scene_view:
             if isinstance(self.handler, DrawingHandler):
                 self.handler.mousePress(self.scene_view, event, self.pen)
+
+            elif isinstance(self.handler, PenTool):
+                self.handler.mousePress(self.scene_view, event, self.pen)
+
             else:
                 self.handler.mousePress(self.scene_view, event, self.brush)
 
@@ -69,7 +77,15 @@ class DrawingController(QObject):
     def setFill(self, color: QColor):
         self.brush.setColor(color)
 
-    def setHandler(self, handler: DrawingHandler | FillPaintHandler):
+    def setBrushStyle(self, style: str):
+        if style in Qt.BrushStyle.__members__:
+            self.brush.setStyle(Qt.BrushStyle[style])
+
+    def setPenStyle(self, style: str):
+        if style in Qt.PenStyle.__members__:
+            self.pen.setStyle(Qt.PenStyle[style])
+
+    def setHandler(self, handler: DrawingHandler | ToolProtocol):
         self.handler = handler
         self.handler_signal.emit(self.handler.__class__.__name__)
 
@@ -79,12 +95,20 @@ class DrawingController(QObject):
         class cls.__name__ or NullDrawingHandler, a DrawingHandler subclass
 
         -- Params --
-        name: name of DrawingHandler subclass as string
+        name: name of DrawingHandler or ToolProtocol. If name is invalid we fallback on NullDrawingHandler
         """
-        value = Handlers[name].value
-        class_obj = self.name_to_classname_mapping.get(value, NullDrawingHandler)
-        if issubclass(class_obj, FillPaintHandler):
-            handler_inst = class_obj()
-        else:
+        class_obj = self.name_to_classname_mapping.get(name, NullDrawingHandler)
+        if issubclass(class_obj, DrawingHandler):
             handler_inst = class_obj(self.handler_signal)
+        else:
+            handler_inst = class_obj()
         self.setHandler(handler_inst)
+
+    def _interupt_shortcut(self):
+        reset = getattr(self.handler, "reset", None)
+        if callable(reset):
+            reset()
+
+    def bind_reset_shortcut(self, view):
+        shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), view)
+        shortcut.activated.connect(self._interupt_shortcut)

@@ -1,31 +1,24 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from PyQt6.QtGui import QBrush, QMouseEvent, QPen, QPainterPath
-from PyQt6.QtCore import QPointF, Qt, pyqtBoundSignal, QRectF
-from PyQt6.QtWidgets import (QGraphicsItem, QGraphicsPathItem, QGraphicsView, QGraphicsScene)
-
-from ..graphics import DeepCopyableEllipseItem, DeepCopyableLineItem, DeepCopyablePathItem, DeepCopyableRectItem, SelectableRectItem, DeepCopyableTextbox
-
+from PyQt6.QtGui import QBrush, QKeySequence, QMouseEvent, QPen, QPainterPath, QShortcut
+from PyQt6.QtCore import QLine, QPointF, Qt, pyqtBoundSignal, QRectF, QLineF
+from PyQt6.QtWidgets import (QGraphicsItem, QGraphicsPathItem, QGraphicsView, QGraphicsScene, QGraphicsRectItem)
+from ..graphics import (DeepCopyableEllipseItem, DeepCopyableLineItem, DeepCopyablePathItem, DeepCopyableRectItem, SelectableRectItem, DeepCopyableTextbox, DeepCopyableArrowItem,
+                        DeepCopyableItemABC, DeepCopyableLineABC, DeepCopyableShapeABC)
+from typing import Protocol
 # GraphicsItems with size smaller than tolerence will be discarded from scene. Assumed to be 'miss click' items
 TOLERENCE = 10
 
 class DrawingHandler(ABC):
     """ Abstact base class for drawing handlers """
-    @abstractmethod
     def __init__(self, handler_signal: pyqtBoundSignal) -> None:
         self.handler_signal = handler_signal
-
     @abstractmethod
-    def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        pass
+    def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen) -> None: ...
     @abstractmethod
-    def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        pass
-
+    def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen) -> None: ...
     @abstractmethod
-    def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        pass
-
+    def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen) -> None: ...
     def max_z_value(self, scene: QGraphicsScene):
         """ Returns z-value of graphicsitem in the forefront of the scene """
         max_val = 0
@@ -36,11 +29,9 @@ class DrawingHandler(ABC):
                 max_val = item_z_val
         return max_val
 
-class PaintHandler(ABC):
-    """ Abstact base class for tools which 'paint'. eg fill tool """
-    @abstractmethod
-    def mousePress(self, view: QGraphicsView, event: QMouseEvent, brush: QBrush):
-        pass
+class ToolProtocol(Protocol):
+    """ Protocol for any tool that only requires mouse press """
+    def mousePress(self, view: QGraphicsView, event: QMouseEvent, tool: QBrush | QPen) -> None: ...
 
 class NullDrawingHandler(DrawingHandler):
     """ No drawing behaviour """
@@ -48,25 +39,31 @@ class NullDrawingHandler(DrawingHandler):
         super().__init__(handler_signal)
 
     def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        pass
+        return
     def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        pass
+        return
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        pass
+        return
 
-class FillPaintHandler(PaintHandler):
-    def __init__(self):
-        super().__init__()
-
-    def mousePress(self, view: QGraphicsView, event: QMouseEvent, brush: QBrush):
+class BrushTool(ToolProtocol):
+    def mousePress(self, view: QGraphicsView, event: QMouseEvent, tool: QBrush):
         scene = view.scene()
-        if not scene:
-            return
+        if not scene: return
         selected = scene.selectedItems()
         for item in selected:
             method = getattr(item, "setBrush", None)
             if callable(method):
-                method(brush)
+                method(tool)
+
+class PenTool(ToolProtocol):
+    def mousePress(self, view: QGraphicsView, event: QMouseEvent, tool: QPen):
+        scene = view.scene()
+        if not scene: return
+        selected = scene.selectedItems()
+        for item in selected:
+            method = getattr(item, "setPen", None)
+            if callable(method):
+                method(tool)
 
 class TextboxDrawingHandler(DrawingHandler):
     """ Tool for drawing Textbox's """
@@ -83,21 +80,24 @@ class TextboxDrawingHandler(DrawingHandler):
             if scene is None:
                 return
             self.drawing = True
-            self.start_point = event.scenePosition()
             self.start_point = view.mapToScene(event.position().toPoint())
 
-    def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        if self.drawing:
-            scene = view.scene()
-            if self.start_point is None or not self.drawing or scene is None:
-                return
-            event_pos = view.mapToScene(event.position().toPoint())
-            bottom_right_x = event_pos.x() if event_pos.x() > self.start_point.x() else self.start_point.x()
-            bottom_right = QPointF( bottom_right_x, event_pos.y())
+    def _get_rect(self, start_point: QPointF, event_pos: QPointF) -> QRectF:
+        bottom_right_x = event_pos.x() if event_pos.x() > start_point.x() else start_point.x()
+        bottom_right = QPointF( bottom_right_x, event_pos.y())
+        start_point = start_point if start_point.x() < event_pos.x() else QPointF(event_pos.x(), start_point.y())
+        return QRectF(start_point, bottom_right)
 
-            start_point = self.start_point if self.start_point.x() < event_pos.x() else QPointF(event_pos.x(), self.start_point.y())
-            rect = QRectF(start_point, bottom_right)
-            if not self.rect_item:
+    def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
+        if self.drawing and self.start_point is not None:
+            scene = view.scene()
+            if scene is None and self.rect_item is None:
+                return
+
+            event_pos = view.mapToScene(event.position().toPoint())
+            rect = self._get_rect(self.start_point, event_pos)
+
+            if self.rect_item is None:
                 self.rect_item = DeepCopyableTextbox(rect)
                 self.rect_item.moving = True
                 scene.addItem(self.rect_item)
@@ -119,23 +119,26 @@ class TextboxDrawingHandler(DrawingHandler):
             self.rect_item = None
         self.drawing = False
 
-class LineDrawingHandler(DrawingHandler):
+
+class GenericLineDrawingHandler(DrawingHandler):
     """ Tool for drawing straight lines """
-    def __init__(self, handler_signal: pyqtBoundSignal):
+    def __init__(self, line_item: Callable[[], DeepCopyableLineABC], handler_signal: pyqtBoundSignal):
         super().__init__(handler_signal)
         self.start_point = None
         self.current_line = None
-
+        self.line_item = line_item
+        self.drawing = False
 
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        if (self.start_point is not None and self.current_line is not None):
+        if (self.start_point is not None and self.current_line is not None and self.drawing):
             end_point = view.mapToScene(event.position().toPoint())
-            self.current_line.setLine(self.start_point.x(), self.start_point.y(), end_point.x(), end_point.y())
+            self.current_line.setLine(QLineF(self.start_point, end_point))
 
     def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         if event.button() == Qt.MouseButton.LeftButton:
+            self.drawing = True
             self.start_point = view.mapToScene(event.position().toPoint())
-            self.current_line = DeepCopyableLineItem()
+            self.current_line = self.line_item()
             self.current_line.setPen(pen)
             scene = view.scene()
             if scene:
@@ -148,8 +151,7 @@ class LineDrawingHandler(DrawingHandler):
                 return
             end_point = view.mapToScene(event.position().toPoint())
 
-            self.current_line.setLine(self.start_point.x(), self.start_point.y(), end_point.x(), end_point.y())
-            scene.removeItem(self.current_line)
+            self.current_line.setLine(QLineF(self.start_point, end_point))
             if self.current_line.line().length() > TOLERENCE:
                 selectable_line = SelectableRectItem(self.current_line, self.handler_signal)
                 scene.addItem(selectable_line)
@@ -157,15 +159,23 @@ class LineDrawingHandler(DrawingHandler):
 
             self.start_point = None
             self.current_line = None
+            self.drawing = False
 
+class LineDrawingHandler(GenericLineDrawingHandler):
+    def __init__(self, signal: pyqtBoundSignal):
+        super().__init__(DeepCopyableLineItem, signal)
+
+class ArrowDrawingHandler(GenericLineDrawingHandler):
+    def __init__(self, signal: pyqtBoundSignal):
+        super().__init__(DeepCopyableArrowItem, signal)
 
 class ShapeDrawingHandler(DrawingHandler):
     """ Tool for drawing rectangles """
-    def __init__(self, handler_signal: pyqtBoundSignal, shape: Callable[[QRectF], DeepCopyableRectItem | DeepCopyableEllipseItem]) -> None:
+    def __init__(self, handler_signal: pyqtBoundSignal, shape: Callable[[], DeepCopyableRectItem | DeepCopyableEllipseItem]) -> None:
         super().__init__(handler_signal)
-        self.shape: Callable[[QRectF], DeepCopyableEllipseItem | DeepCopyableRectItem] = shape
-        self.tmp_scene_item = None
+        self.shape_callback = shape
         self.drawing_started = False
+        self.shape_item = None
         self.start_point: None | QPointF = None
         self.selectable_rect_item = None
 
@@ -180,36 +190,32 @@ class ShapeDrawingHandler(DrawingHandler):
         return QRectF(top_left_x, top_left_y, width, height)
 
     def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
+        scene = view.scene()
+        if scene is None:
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             self.drawing_started = True
             self.start_point = view.mapToScene(event.position().toPoint())
+            self.shape_item = self.shape_callback()
+            scene.addItem(self.shape_item)
 
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        scene = view.scene()
-        if self.start_point is not None and scene is not None and self.drawing_started:
-            if self.tmp_scene_item is None:
-                event_pos = view.mapToScene(event.position().toPoint())
-                rect = self._get_rect(self.start_point, event_pos)
-                self.tmp_scene_item = self.shape(rect)
-                self.tmp_scene_item.setPen(pen)
-                scene.addItem(self.tmp_scene_item)
-                self.tmp_scene_item.setZValue(self.max_z_value(scene))
-            else:
-                event_pos = view.mapToScene(event.position().toPoint())
-                rect = self._get_rect(self.start_point, event_pos)
-                self.tmp_scene_item.setRect(rect)
+        if self.start_point is not None and self.shape_item is not None and self.drawing_started:
+            event_pos = view.mapToScene(event.position().toPoint())
+            rect = self._get_rect(self.start_point, event_pos)
+            self.shape_item.setRect(rect)
 
     def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         scene = view.scene()
-        if scene is not None and self.tmp_scene_item:
-            scene.removeItem(self.tmp_scene_item)
-
-            if self.tmp_scene_item.boundingRect().width() > TOLERENCE or self.tmp_scene_item.boundingRect().height() > TOLERENCE:
-                selectable_rect = SelectableRectItem(self.tmp_scene_item, self.handler_signal)
+        if scene is None:
+            return
+        if event.button() == Qt.MouseButton.LeftButton and self.shape_item is not None:
+            if self.shape_item.boundingRect().width() > TOLERENCE or self.shape_item.boundingRect().height() > TOLERENCE:
+                selectable_rect = SelectableRectItem(self.shape_item, self.handler_signal)
                 scene.addItem(selectable_rect)
 
             self.drawing_started = False
-            self.tmp_scene_item = None
+            self.shape_item = None
 
 class RectDrawingHandler(ShapeDrawingHandler):
     def __init__(self, handler_signal):
@@ -218,27 +224,6 @@ class RectDrawingHandler(ShapeDrawingHandler):
 class EllipseDrawingHandler(ShapeDrawingHandler):
     def __init__(self, handler_signal):
         super().__init__(handler_signal, DeepCopyableEllipseItem)
-
-class BelzierDrawingHandler(DrawingHandler):
-    def __init__(self, handler_signal: pyqtBoundSignal):
-        super().__init__(handler_signal)
-        self.drawing_started = False
-        self.current_line = None
-        self.selectable_rect_item = None
-        self.item = None
-
-    def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        if self.drawing_started:
-            # add stuff to scene
-            # if new line is super short then flase
-            self.drawing_started = False
-        else:
-            self.drawing_started = True
-        pass
-    def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        pass
-    def mouseRelease(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
-        pass
 
 class FreeHandDrawingHandler(DrawingHandler):
     """ Handles drawing behaviour of free hand tool """
@@ -264,10 +249,8 @@ class FreeHandDrawingHandler(DrawingHandler):
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen):
         scene = view.scene()
         # Check for events occuring out of bounds or any required variables being None
-        if (not self.drawing_started or
-            scene is None or
-            not self.inBounds(scene, event) or
-            self.current_path_item is None
+        if (not self.drawing_started or scene is None
+            or not self.inBounds(scene, event) or self.current_path_item is None
             ):
             return
 
@@ -294,3 +277,62 @@ class FreeHandDrawingHandler(DrawingHandler):
     def inBounds(self, scene: QGraphicsScene, event: QMouseEvent) -> bool:
         """ Returns true if event took place within the bounds of scene """
         return scene.sceneRect().contains(event.position())
+
+
+class ConnectedLineHandler(DrawingHandler):
+    connection_zones: list[QPointF] = []
+    radius = 5
+
+    def __init__(self, handler_signal: pyqtBoundSignal):
+        self.handler_signal = handler_signal
+        self.drawing = False
+        self.current_line = None
+        self.start_point = None
+
+    @classmethod
+    def _add_connection_zone(cls, pos: QPointF):
+        """
+        pos: scene position
+        """
+        cls.connection_zones.append(pos)
+
+    @staticmethod
+    def _euclid_distance(p1: QPointF, p2: QPointF):
+        return ((p1.x() - p2.x())**2 + (p1.y() - p2.y())**2 )** (1/2)
+
+    @classmethod
+    def attempt_connection(cls, pos: QPointF) -> None | QPointF:
+        for point in cls.connection_zones:
+            if cls._euclid_distance(point, pos) < cls.radius:
+                return QPointF(point.x(), point.y()) # is this necessary?
+
+    def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen) -> None:
+        # End drawing
+        if self.drawing and self.start_point is not None and self.current_line is not None:
+            end_point = view.mapToScene(event.position().toPoint())
+            self.current_line.setLine(QLineF(self.start_point, end_point))
+            self.reset()
+            return
+        # Start drawing
+        scene = view.scene()
+        if scene is None:
+            return
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drawing = True
+            self.start_point = view.mapToScene(event.position().toPoint())
+            self.current_line = DeepCopyableLineItem()
+            self.current_line.setPen(pen)
+            scene.addItem(self.current_line)
+            self.current_line.setZValue(self.max_z_value(scene))
+
+    def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen) -> None:
+        if self.start_point is not None and self.current_line is not None and self.drawing:
+            event_pos = view.mapToScene(event.position().toPoint())
+            self.current_line.setLine(QLineF(self.start_point, event_pos))
+
+    def mouseRelease(self, view, event, pen):
+        return
+    def reset(self):
+        self.drawing = False
+        self.start_point = None
+        self.current_line = None

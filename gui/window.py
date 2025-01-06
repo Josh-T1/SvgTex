@@ -1,23 +1,23 @@
 from collections.abc import Callable
 from copy import deepcopy
-from typing import Literal
+from typing import Literal, Optional, Pattern
 from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QColor, QCursor, QGuiApplication, QIcon, QKeyEvent, QKeySequence, QMouseEvent, QPaintEvent, QPainterPath, QPen, QPainter, QPixmap, QTransform
-from PyQt6.QtCore import QByteArray, QKeyCombination, QPointF, QRect, Qt, QRectF, pyqtBoundSignal, pyqtSignal, QEvent, QSize
+from PyQt6.QtCore import QByteArray, QKeyCombination, QLineF, QPointF, QRect, Qt, QRectF, pyqtBoundSignal, pyqtSignal, QEvent, QSize
 from PyQt6.QtSvg import QSvgGenerator, QSvgRenderer
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel,
-                             QMessageBox, QPinchGesture, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
-                             QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem, QGraphicsRectItem)
+                             QMessageBox, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
+                             QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem, QGraphicsRectItem, QComboBox, QFormLayout, QStackedWidget)
 
 from ..graphics.wrappers import DeepCopyablePathItem, DeepCopyableRectItem
-
+from ..graphics.items import DeepCopyableArrowItem
 from ..drawing.drawing_controller import DrawingController
 from ..graphics import DeepCopyableSvgItem, StoringQSvgRenderer, DeepCopyableTextbox, SelectableRectItem, DeepCopyableItemGroup
 from collections import deque
 import logging
 from pathlib import Path
 from ..svg import scene_to_svg, SvgBuilder
-from ..utils import tex2svg, text_is_latex, Handlers
+from ..utils import tex2svg, text_is_latex, Handlers, Tools
 logger = logging.getLogger(__name__)
 
 UNSAVED_NAME = "No Name **"
@@ -25,6 +25,14 @@ MEDIA_PATH = Path(__file__).parent.parent / "media"
 
 class ShortcutCloseEvent(QCloseEvent):
     pass
+class LatexCompilationError(Exception):
+    pass
+
+class MissingMathDelimeterError(Exception):
+    default_message = "Missing math delimeter"
+    def __init__(self, message: str | None = None):
+        self.message = message if message is not None else self.default_message
+        super().__init__(self.message)
 
 class PngCheckBox(QWidget):
     def __init__(self, path: str):
@@ -43,33 +51,67 @@ class PngCheckBox(QWidget):
         custom_icon = QIcon(self.path)
         self.checkbox.setIcon(custom_icon)
 
+
+
 class ToggleMenuWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.toggle_menu_layout = QVBoxLayout()
+        self.toggle_menu_layout.setContentsMargins(0, 0, 0, 0)
 
         self.initUi()
         self.setLayout(self.toggle_menu_layout)
         self.setFixedWidth(200)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
+
     def initUi(self):
         self._create_widgets()
+        self._add_widgets()
+
     def _create_widgets(self):
-        self.label = QLabel("Item 1")
+        brush_patterns = [QCheckBox(Qt.BrushStyle.SolidPattern.name),
+                          QCheckBox(Qt.BrushStyle.VerPattern.name),
+                          QCheckBox(Qt.BrushStyle.DiagCrossPattern.name),
+                          QCheckBox(Qt.BrushStyle.CrossPattern.name)
+                          ]
+        pen_patterns = [QCheckBox(Qt.PenStyle.SolidLine.name),
+                        QCheckBox(Qt.PenStyle.DashLine.name),
+                        QCheckBox(Qt.PenStyle.DashDotDotLine.name),
+                        QCheckBox(Qt.PenStyle.DashDotLine.name),
+                        QCheckBox(Qt.PenStyle.DotLine.name)
+                        ]
+        self.brush_pattern_label = QLabel("Fill Pattern")
+        self.brush_pattern_checkbox = SingleCheckBox(*brush_patterns)
+        self.pen_pattern_checkbox = SingleCheckBox(*pen_patterns)
+#        self.fill_patterns = QTextList()
+        self.pen_pattern_label = QLabel("Pen Pattern")
+
     def _add_widgets(self):
-        self.toggle_menu_layout.addWidget(self.label)
+        self.toggle_menu_layout.addWidget(self.pen_pattern_label)
+        self.toggle_menu_layout.addWidget(self.pen_pattern_checkbox)
+        self.toggle_menu_layout.addWidget(self.brush_pattern_label)
+        self.toggle_menu_layout.addWidget(self.brush_pattern_checkbox)
+        self.toggle_menu_layout.addStretch()
+        self.toggle_menu_layout.addStretch()
+        self.toggle_menu_layout.addStretch()
+
+    def connectBrushStyle(self, func):
+        self.brush_pattern_checkbox.clicked.connect(func)
+    def connectPenStyle(self, func):
+        self.pen_pattern_checkbox.clicked.connect(func)
 
 class RulerWidget(QWidget):
     def __init__(self, orientation: Literal["horizontal", "vertical"], parent=None):
-        super().__init__(parent)
-        self.orientation = orientation
-        if self.orientation == "horizontal": self.setFixedWidth(20)
-        else: self.setFixedHeight(20)
-        self.setAutoFillBackground(True)
-        pallete = self.palette()
-        pallete.setColor(self.backgroundRole(), QColor("lightgray"))
-        self.setPalette(pallete)
+        raise NotImplemented()
+#        super().__init__(parent)
+#        self.orientation = orientation
+#        if self.orientation == "horizontal": self.setFixedWidth(20)
+#        else: self.setFixedHeight(20)
+#        self.setAutoFillBackground(True)
+#        pallete = self.palette()
+#        pallete.setColor(self.backgroundRole(), QColor("lightgray"))
+#        self.setPalette(pallete)
 
     def paintEvent(self, event: QPaintEvent):
         if not (parent := self.parent()): return
@@ -115,6 +157,13 @@ class GraphicsView(QGraphicsView):
     def controller(self) -> DrawingController | None:
         return self._controller
 
+    def keyPressEvent(self, event: Optional[QKeyEvent]) -> None:
+        if event is None:
+            return
+        if event.key() == Qt.Key.Key_Escape:
+            print("escape")
+        super().keyPressEvent(event)
+
     def wheelEvent(self, event):
         if event:
             event.ignore()
@@ -158,6 +207,7 @@ class TexGraphicsScene(QGraphicsScene):
         self.cache_max = cache_max
         self.clipboard_item: QGraphicsItem | None = None
 
+
     def copy_to_clipboard(self):
         for item in self.selectedItems():
             if hasattr(item, "__deepcopy__") and isinstance(item, SelectableRectItem):
@@ -170,10 +220,7 @@ class TexGraphicsScene(QGraphicsScene):
 
             offset = pos - self.clipboard_item.mapToScene(self.clipboard_item.boundingRect().topLeft())
             translation = QTransform().translate(offset.x(), offset.y())
-#            self.clipboard_item.setPos(self.clipboard_item.scenePos() + offset)
             self.clipboard_item.setTransform(translation)
-#            text = SelectableRectItem(Textbox(QRectF(0, 0, 100, 100)), select_signal=self.clipboard_item.select_signal)
-#            self.addItem(text)
             self.clipboard_item = None
 
     def keyPressEvent(self, event: QKeyEvent | None):
@@ -195,7 +242,7 @@ class TexGraphicsScene(QGraphicsScene):
                     if isinstance(item, SelectableRectItem):
                         self.removeItem(item)
                         self.add_to_cache(item)
-                        del SelectableRectItem.selectableItems[item._id]
+                        del item
 
 
         super().keyPressEvent(event)
@@ -205,16 +252,30 @@ class TexGraphicsScene(QGraphicsScene):
             self.cache.popleft()
         self.cache.append(item)
 
+    def set_error_message(self, msg: str):
+        msg_box = QMessageBox()
+        msg_box.setText(msg)
+        msg_box.setWindowTitle("Error")
+        msg_box.exec()
+
     def compile_latex(self, signal):
+        failed = set()
         for item in self.items():
             parent = item.parentItem()
             if not isinstance(item, DeepCopyableTextbox) or not isinstance(parent, SelectableRectItem):
                 continue
 
-            res_item = self.attempt_compile(item.text())
+            try:
+                res_item = self.attempt_compile(item.text())
+            except MissingMathDelimeterError as e:
+                failed.add(str(e))
+                continue
+            except LatexCompilationError as e:
+                failed.add(str(e))
+                continue
 #
             if res_item is not None:
-                global_pos = item.mapToScene(item.boundingRect().topLeft())# - parent.pos()
+                global_pos = item.mapToScene(item.boundingRect().topLeft())
                 transform = res_item.sceneTransform()
 
                 inverse = transform.inverted()[0]
@@ -229,38 +290,25 @@ class TexGraphicsScene(QGraphicsScene):
                 self.removeItem(parent)
                 del item
 
+        num_failed = len(failed)
+        if num_failed > 0:
+            msg = f"Failed to compile {num_failed} items\n"
+            msg += "\n".join(failed)
+            self.set_error_message(msg)
 
-    def attempt_compile(self, text):
+
+    def attempt_compile(self, text) -> DeepCopyableSvgItem:
         if not text_is_latex(text):
-            return None
-
-        svg_bytes = tex2svg(text)
-        if svg_bytes is None: return None
+            raise MissingMathDelimeterError(f"Missing math delimeter\nEquation: {text}")
+        try:
+            svg_bytes = tex2svg(text)
+        except Exception:
+            raise LatexCompilationError(f"Failed to compile equation {text}")
         q_byte_array = QByteArray(svg_bytes.read())
         renderer = StoringQSvgRenderer(q_byte_array)
         item = DeepCopyableSvgItem()
         item.setSharedRenderer(renderer)
-        svg_bytes.seek(0)
         return item
-
-#
-#        builder = SvgBuilder(svg_bytes.read())
-#        svg_items = builder.build_scene_items()
-#        svg_bytes.seek(0)
-#        print(svg_bytes.read().decode('utf-8'))
-#        if len(svg_items) == 0: return None
-#        svg_items = svg_items[1:] # Hack solution. For some reason matplotlib
-#        tranform = svg_items[0].sceneTransform()
-#        group = DeepCopyableItemGroup()
-#        for item in svg_items:
-#            group.addToGroup(item)
-#        return group
-
-        #if len(svg_items) > 1: # Hack solution. For some reason matplot lib seems to always return two items, one of which is a white square
-#            item = svg_items[1]
-#            return item
-#        else:
-#            return None
 
 class IntBox(QWidget):
     clicked = pyqtSignal(int)
@@ -440,7 +488,6 @@ class VToolBar(QWidget):
         self.initUi()
         self.setLayout(self.toolbar_layout)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-#        self.toolbar_layout.setSpacing()
 
     def initUi(self):
         self._create_widgets()
@@ -456,7 +503,10 @@ class VToolBar(QWidget):
                             QCheckBox(str(Handlers.Textbox.name)),
                             QCheckBox(str(Handlers.Rect.name)),
                             QCheckBox(str(Handlers.Ellipse.name)),
-                            QCheckBox(str(Handlers.Fill.name)),
+                            QCheckBox(str(Tools.Brush.name)),
+                            QCheckBox(str(Tools.Pen.name)),
+                            QCheckBox(str(Handlers.Arrow.name)),
+                            QCheckBox(str(Handlers.ConnectedLine.name)),
                             selector_box]
         self.tool_checkbox = SingleCheckBox(*self.check_boxes, fallback = selector_box.text())
         self.pen_size_selector_label = QLabel("Pen Width")
@@ -516,8 +566,14 @@ class VToolBar(QWidget):
 
 class MainWindow(QMainWindow):
     def __init__(self, *args, **kwargs):
+        """
+        _filepath: path to svg file
+        user_dir: location where script is launched
+
+        """
         super().__init__(*args, **kwargs)
-        self._filepath = None
+        self._filepath: None | str = None
+        self.user_dir: str | None = None
         self.scene_default_width = 1052 * 0.75
         self.scene_default_height = 744 * 0.75
         self.initUi()
@@ -567,7 +623,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(open_action)
         toolbar.addWidget(spacer)
         toolbar.addWidget(self.filename_widget)
-        save_action.triggered.connect(self.save_as_svg)
+        save_action.triggered.connect(self.set_file_path)
         open_action.triggered.connect(self._load_from_selection)
 
 
@@ -609,6 +665,7 @@ class MainWindow(QMainWindow):
 
         self.tool_bar.connectToggleSelection(SelectableRectItem.toggleEnabled)
 
+
     def _add_widgets(self):
         self.main_layout.addWidget(self.scroll_area)
         self.main_layout.addWidget(self.tool_bar)
@@ -623,16 +680,34 @@ class MainWindow(QMainWindow):
         self.tool_bar.connectColorSelection(controller.setPenColor)
         self.tool_bar.connectFillColorSelection(controller.setFill)
 
+        self.toggle_menu.connectBrushStyle(controller.setBrushStyle)
+        self.toggle_menu.connectPenStyle(controller.setPenStyle)
+
+#        tmp = DeepCopyableArrowItem(QLineF(QPointF(100, 100), QPointF(200, 200)))
+#        s = SelectableRectItem(tmp, self.graphics_view.controller().handler_signal)
+#        self._scene.addItem(s)
 
     @property
     def scene(self):
         return self.graphics_view.scene()
 
+    def load_svg_as_svgItem(self, filepath: str):
+        """
+        TODO: test
+        """
+        with open(filepath, "rb") as f:
+            file_bytes = f.read()
+        q_byte_array = QByteArray(file_bytes)
+        renderer = StoringQSvgRenderer(q_byte_array)
+        item = DeepCopyableSvgItem()
+        item.setSharedRenderer(renderer)
+        self._scene.addItem(item)
+
     def _load_from_selection(self):
         # TODO empty arg is dir to check... how do I decide this? allow for sys.argv?
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open File", "", "SVG Files (*.svg)")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Open File", str(Path().cwd()), "SVG Files (*.svg)")
         if Path(file_path).is_file():
-            self.load_svg(file_path)
+            self.load_svg_as_svgItem(file_path)
 
     def closeEvent(self, event: QCloseEvent): #type: ignore
         """ TODO: Make this better """
@@ -653,12 +728,11 @@ class MainWindow(QMainWindow):
 
             self.filepath = str(home_dir / f"veditor_unamed{num}")
             self.save()
-            return
 
         reply = QMessageBox.question(self, "Confirm Close", "Do you want to save before closing?",
                                       QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
         if reply == QMessageBox.StandardButton.Save:
-            return_code = self.save_as_svg()
+            return_code = self.set_file_path()
             if return_code == 0:
                 event.accept()
             else:
@@ -668,37 +742,38 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
-    def save_as_svg(self):
-#        options = QFileDialog.options
+    def set_file_path(self):
         if self._filepath is None:
-            file_path, _ = QFileDialog.getSaveFileName(self, "Save File", "", "SVG Files (*.svg)")
-        else:
-            file_path = self._filepath
+            self._filepath, _ = QFileDialog.getSaveFileName(self,
+                                                            "Save File",
+                                                            str(Path().cwd()),
+                                                            "SVG Files (*.svg)")
 
-        return_code = scene_to_svg(self._scene, file_path)
+        return_code = self.save()
         if return_code == 1:
-            display_name = f"error while saving: {file_path}" if return_code == 1 else file_path.split("/")[-1]
+            display_name = f"error while saving: {self._filepath}" if return_code == 1 else self._file_path.split("/")[-1]
             self.filename_widget.setText(display_name)
-        else:
-            self.filepath = file_path
         return return_code
 
     def save(self):
         """ Save svg """
+        if not isinstance(self._filepath, str) or self._filepath == "":
+            return 1
         scene_to_svg(self._scene, self._filepath)
+        return 0
 
     def build_svg(self):
         pass
 
-    def open_with_svg(self, filepath: str):
+    def open_with_svg(self, filepath: str, user_dir: str | None = None):
         """ Loads svg and sets filename to svg name. Implements 'editing' functionality, the original svg will
         overidden when saved"""
-        self.load_svg(filepath, scale=1)
+        self.user_dir = user_dir if user_dir is not None else str(Path().cwd())
+        self.load_svg(filepath)
         self.filepath = filepath
 
-    def load_svg(self, file_path: str, scale=0.5):
+    def load_svg(self, file_path: str):
         """ TODO """
-#        svg_item = DeepCopyableSvgItem(file_path)
         builder = SvgBuilder(Path(file_path))
         svg_items = builder.build_scene_items()
         cont = self.graphics_view.controller()
@@ -753,15 +828,15 @@ class MainWindow(QMainWindow):
             if callable(func):
                 func()
             return
-
         shortcuts = [
-                (Qt.Key.Key_F, lambda: call_click(str(Handlers.Freehand.name)), "Freehand", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
-                (Qt.Key.Key_L, lambda: call_click(str(Handlers.Line.name)), "Line", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
-                (Qt.Key.Key_T, lambda: call_click(str(Handlers.Textbox.name)), "Textbox", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
-                (Qt.Key.Key_R, lambda: call_click(str(Handlers.Rect.name)), "Rect", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
-                (Qt.Key.Key_P, lambda: call_click(str(Handlers.Fill.name)), "Pain", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
-                (Qt.Key.Key_S, lambda: call_click(str(Handlers.Selector.name)), "Selector", {"modifiers":Qt.KeyboardModifier.ShiftModifier}),
-                (Qt.Key.Key_C, lambda: self._scene.compile_latex(self.get_handeler_signal()), "Compile latex", {"modifiers": Qt.KeyboardModifier.ShiftModifier}),
+                (Qt.Key.Key_F, lambda: call_click(str(Handlers.Freehand.name)), "Freehand", {"modifiers":Qt.KeyboardModifier.MetaModifier}),
+                (Qt.Key.Key_L, lambda: call_click(str(Handlers.Line.name)), "Line", {"modifiers":Qt.KeyboardModifier.MetaModifier}),
+                (Qt.Key.Key_T, lambda: call_click(str(Handlers.Textbox.name)), "Textbox", {"modifiers":Qt.KeyboardModifier.MetaModifier}),
+                (Qt.Key.Key_R, lambda: call_click(str(Handlers.Rect.name)), "Rect", {"modifiers":Qt.KeyboardModifier.MetaModifier}),
+                (Qt.Key.Key_B, lambda: call_click(str(Tools.Brush.name)), "Brush", {"modifiers":Qt.KeyboardModifier.MetaModifier}),
+                (Qt.Key.Key_P, lambda: call_click(str(Tools.Pen.name)), "Pen", {"modifiers":Qt.KeyboardModifier.MetaModifier}),
+                (Qt.Key.Key_S, lambda: call_click(str(Handlers.Selector.name)), "Selector", {"modifiers":Qt.KeyboardModifier.MetaModifier}),
+                (Qt.Key.Key_C, lambda: self._scene.compile_latex(self.get_handeler_signal()), "Compile latex", {"modifiers": Qt.KeyboardModifier.MetaModifier}),
                 (Qt.Key.Key_N, lambda: SelectableRectItem.cycle(self.get_cursor_pos()), "Cycle selectable items under curosr", {"modifiers": Qt.KeyboardModifier.MetaModifier}),
                 (Qt.Key.Key_C, self._scene.copy_to_clipboard, "Copy item", {"modifiers": Qt.KeyboardModifier.ControlModifier}),
                 (Qt.Key.Key_V, lambda: self._scene.paste_from_clipboard(self.get_cursor_pos()), "Paste item", {"modifiers": Qt.KeyboardModifier.ControlModifier}),

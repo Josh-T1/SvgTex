@@ -6,23 +6,18 @@ from PyQt6.QtWidgets import (QGraphicsSceneMouseEvent, QGraphicsItem)
 import math
 
 class TransformationHandler(ABC):
-    @abstractmethod
-    def __init__(self, set_rect_callback, item): # TODO
+    def __init__(self, set_rect_callback: Callable[[], QRectF], item):
         self.set_rect_callback = set_rect_callback
         self.item = item
-
+    @abstractmethod
+    def handle_mouse_move(self, event) -> None: ...
+    @abstractmethod
+    def handle_mouse_press(self, event) -> None: ...
+    @abstractmethod
+    def handle_mouse_release(self, event) -> None: ...
     @property
     def rect(self):
         return self.set_rect_callback()
-    @abstractmethod
-    def handle_mouse_move(self, event):
-        pass
-    @abstractmethod
-    def handle_mouse_press(self, event):
-        pass
-    @abstractmethod
-    def handle_mouse_release(self, event):
-        pass
 
 class RotationHandler(TransformationHandler):
     """ RotationHandler implements rotation behaviour of QGraphicsItem """
@@ -99,8 +94,6 @@ class ScaleHandler(TransformationHandler):
         item: QGraphicsItem wich is the target of the scaling
         bounding_rect_callback: Callable wich returns the QRectF object representing the bounding rectangle of self.item
         corner: of the form '(top/down)_(right/left)'. The corner of items's bounding rectangle on which handler rect resides.
-        reflected_x_callback: callback that returns true if the item has been reflected about the x axis
-        reflected_y_callback: callback that returns true if the item has been reflected about the y axis
         """
         super().__init__(set_rect_callback, item)
         self.bounding_rect_callback = bounding_rect_callback
@@ -208,10 +201,8 @@ class ScaleHandler(TransformationHandler):
         reflected_about_x = self.item.sceneTransform().m11() < 0
         reflected_about_y = self.item.sceneTransform().m22() < 0
         if reflected_about_x:
-            print("not top")
             left = not left
         if reflected_about_y:
-            print("y reflect")
             top = not top
 
         translate_center = self._get_corner(not top, not left)

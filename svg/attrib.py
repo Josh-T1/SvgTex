@@ -18,7 +18,6 @@ def build_pen_from_attrib(attrib: etree._Element.attrib, pen: QPen) -> QPen:
     stroke_linecap = attrib.get('stroke-linecap', _defaults["stroke-linecap"])
     if stroke_color: pen.setColor(QColor(stroke_color))
     if stroke_width: pen.setWidthF(float(stroke_width))
-
     # Apply stroke line cap style to QPen
     if stroke_linecap:
         if stroke_linecap == 'round': pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -26,14 +25,27 @@ def build_pen_from_attrib(attrib: etree._Element.attrib, pen: QPen) -> QPen:
         elif stroke_linecap == 'butt': pen.setCapStyle(Qt.PenCapStyle.FlatCap)
     return pen
 
-def build_brush_from_attrib(attrib: etree._Element.attrib, brush: QBrush) -> QPen:
+def build_brush_from_attrib(attrib: etree._Element.attrib, brush: QBrush) -> QBrush:
+    # name vs rgb handle both
     fill_color = attrib.get('fill', "none")
-    if fill_color: # for some reason ```brush = QBrush(); brush.setColor(QColor("black"))``` does not work.. tmp fix
-        brush.setColor(fill_color)
+    fill_opacity = attrib.get("fill-opacity", 255)
+    if "rgb" in fill_color:
+        contents = fill_color.split("(")[1].split(")")[0]
+        contents_clean = [i.strip() for i in contents.split(",")]
+        if len(contents_clean) == 3:
+            r, g, b = contents_clean
+            brush.setColor(QColor(int(r), int(g), int(b), int(fill_opacity)))
+        elif len(contents_clean) == 4:
+            r, g, b, opacity = contents_clean
+            brush.setColor(QColor(int(r), int(g), int(b), int(opacity)))
     else:
-        brush = QBrush(QColor("transparent")) # does this work
+        if fill_color != "none": # for some reason ```brush = QBrush(); brush.setColor(QColor("black"))``` does not work.. tmp fix
+            brush.setColor(QColor(fill_color))
+        else:
+            brush = QBrush(QColor("transparent")) # does this work
+    return brush
 
-def build_tools_from_style(style: str, pen: QPen, brush: QBrush) -> QPen:
+def build_tools_from_style(style: str, pen: QPen, brush: QBrush) -> tuple[QPen, QBrush]:
     properties = style.split(';')
 
     for prop in properties:
@@ -44,35 +56,48 @@ def build_tools_from_style(style: str, pen: QPen, brush: QBrush) -> QPen:
         value = value.strip()
 
         if key == 'fill':
-            if value == "none": pass
+            if value == "none":
+                continue
             elif value.startswith("url"):
                 url = value.split("(")[1].split(")")[0]
-                if url == "#dense1Pattern": brush.setStyle(Qt.BrushStyle.Dense1Pattern)
-                elif url == "#dense2Pattern": brush.setStyle(Qt.BrushStyle.Dense2Pattern)
-                elif url == "#dense3Pattern": brush.setStyle(Qt.BrushStyle.Dense3Pattern)
-                elif url == "#dense4Pattern": brush.setStyle(Qt.BrushStyle.Dense4Pattern)
-                elif url == "#dense5Pattern": brush.setStyle(Qt.BrushStyle.Dense5Pattern)
-                elif url == "#dense6Pattern": brush.setStyle(Qt.BrushStyle.Dense6Pattern)
-                elif url == "#dense7Pattern": brush.setStyle(Qt.BrushStyle.Dense7Pattern)
-                elif url == "#horPattern": brush.setStyle(Qt.BrushStyle.HorPattern)
-                elif url == "#verPattern": brush.setStyle(Qt.BrushStyle.VerPattern)
-                elif url == "#crossPattern": brush.setStyle(Qt.BrushStyle.CrossPattern)
-                elif url == "#bDiagPattern": brush.setStyle(Qt.BrushStyle.BDiagPattern)
-                elif url == "#fDiagPattern": brush.setStyle(Qt.BrushStyle.FDiagPattern)
-                elif url == "#diagCrossPattern": brush.setStyle(Qt.BrushStyle.DiagCrossPattern)
+                re_pattern = r'^#(\d+)-(\d+)-(\d+)-(\d+)-([\w]+)$'
+                match = re.match(re_pattern, url)
+                if not match:
+                    continue
+                r, g, b, opacity, pattern_id = match.group(1), match.group(2), match.group(3), match.group(4), match.group(5)
+                if pattern_id == "dense1Pattern": brush.setStyle(Qt.BrushStyle.Dense1Pattern)
+                elif pattern_id == "dense2Pattern": brush.setStyle(Qt.BrushStyle.Dense2Pattern)
+                elif pattern_id == "dense3Pattern": brush.setStyle(Qt.BrushStyle.Dense3Pattern)
+                elif pattern_id == "dense4Pattern": brush.setStyle(Qt.BrushStyle.Dense4Pattern)
+                elif pattern_id == "dense5Pattern": brush.setStyle(Qt.BrushStyle.Dense5Pattern)
+                elif pattern_id == "dense6Pattern": brush.setStyle(Qt.BrushStyle.Dense6Pattern)
+                elif pattern_id == "dense7Pattern": brush.setStyle(Qt.BrushStyle.Dense7Pattern)
+                elif pattern_id == "horPattern": brush.setStyle(Qt.BrushStyle.HorPattern)
+                elif pattern_id == "verPattern": brush.setStyle(Qt.BrushStyle.VerPattern)
+                elif pattern_id == "crossPattern": brush.setStyle(Qt.BrushStyle.CrossPattern)
+                elif pattern_id == "bDiagPattern": brush.setStyle(Qt.BrushStyle.BDiagPattern)
+                elif pattern_id == "fDiagPattern": brush.setStyle(Qt.BrushStyle.FDiagPattern)
+                elif pattern_id == "diagCrossPattern": brush.setStyle(Qt.BrushStyle.DiagCrossPattern)
+                brush.setColor(QColor(int(r), int(g), int(b), int(opacity)))
             else:
-                pairs = value.split(";")
-                r, b, g,  fill_opacity = 0, 0, 0, 255
-                for fill_key, fill_value in pairs:
-                    if fill_key == "rgb":
-                    # Handle brush color
-                        contents = fill_value.split("(")[1].split(")")[0]
-                        r_str, g_str, b_str = contents.split(" ")
-                        r, g, b = int(r_str.strip()), int(g_str.strip()), int(b_str.strip())
-                    elif fill_key == "fill-opacity":
-                        fill_opacity = int(value.strip())
-                brush.setColor(QColor(r, b, g, fill_opacity))
-                brush.setStyle(Qt.BrushStyle.SolidPattern)
+                if "rgb" in value:
+                    contents = value.split("(")[1].split(")")[0]
+                    contents_clean = [i.strip() for i in contents.split(",")]
+                    if len(contents_clean) == 3:
+                        r, g, b = contents_clean
+                        brush.setColor(QColor(int(r), int(b), int(g)))
+                        brush.setStyle(Qt.BrushStyle.SolidPattern)
+                    elif len(contents_clean) == 4:
+                        r, g, b, opacity = contents_clean
+                        brush.setColor(QColor(int(r), int(b), int(g), int(opacity)))
+                        brush.setStyle(Qt.BrushStyle.SolidPattern)
+                else:
+                    brush.setColor(QColor(value))
+                    brush.setStyle(Qt.BrushStyle.SolidPattern)
+
+        elif key == "fill_opacity":
+            r, g, b = brush.color().red(), brush.color().green(), brush.color().blue()
+            brush.setColor(QColor(int(r), int(g), int(b), int(value)))
 
         elif key == 'stroke': pen.setColor(QColor(value))
         elif key == 'stroke-width': pen.setWidthF(float(value))

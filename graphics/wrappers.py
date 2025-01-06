@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
+from typing import overload
 from PyQt6.QtGui import QBrush, QColor, QMouseEvent, QPainter, QPainterPath, QPen, QKeyEvent, QTextCursor, QTransform
 from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, QLineF, QPointF, QSize, Qt, QRectF
 from PyQt6.QtSvg import QSvgGenerator, QSvgRenderer
@@ -9,24 +10,15 @@ from ..utils import KeyCodes
 from abc import ABC, abstractmethod
 import re
 from ..utils import transform_path
+from .patterns import (build_dense_pattern_svg, color_to_rgb, build_hor_pattern_svg, build_ver_pattern_svg,
+                            build_cross_pattern_svg, build_bdiag_pattern_svg, build_fdiag_pattern_svg, build_diagcross_pattern_svg)
 
-
-def color_to_rgb(color: QColor):
-    """ Converts QColor object to string representation following valid svg formatting """
-    return f'rgb({color.red()}, {color.green()}, {color.blue()})'
-
-class DeepCopyableGraphicsItem(QGraphicsItem):
+class DeepCopyableItemABC(QGraphicsItem):
     """ Wrapper for QGraphicsItem that supports deepcopy """
-
     @abstractmethod
-    def __deepcopy__(self, memo) -> DeepCopyableGraphicsItem:
-        pass
-
+    def __deepcopy__(self, memo) -> DeepCopyableItemABC: ...
     @abstractmethod
-    def to_svg(self) -> str:
-        """ Converts DeepCopyableGraphicsItem to svg code """
-        pass
-
+    def to_svg(self, defs) -> str: ...
     def copy_pen(self, pen: QPen):
         new_pen = QPen()
         new_pen.setColor(pen.color())
@@ -42,96 +34,98 @@ class DeepCopyableGraphicsItem(QGraphicsItem):
         return new_pen
 
     def pen_to_svg(self, pen: QPen):
-        color = pen.color()
-        color_str = color_to_rgb(color)
-        width = pen.widthF()
-        style = pen.style()
-
-        if style == Qt.PenStyle.DashLine:
-            dasharray = '5, 5'
-        elif style == Qt.PenStyle.DotLine:
-            dasharray = '1, 5'
-        elif style == Qt.PenStyle.DashDotLine:
-            dasharray = '5, 5, 1, 5'
-        elif style == Qt.PenStyle.DashDotDotLine:
-            dasharray = '5, 5, 1, 5, 1, 5'
-        else:
-            dasharray = "none"
+        color_str = color_to_rgb(pen.color())
+        width, style = pen.widthF(), pen.style()
+        if style == Qt.PenStyle.DashLine: dasharray = '5, 5'
+        elif style == Qt.PenStyle.DotLine: dasharray = '1, 5'
+        elif style == Qt.PenStyle.DashDotLine: dasharray = '5, 5, 1, 5'
+        elif style == Qt.PenStyle.DashDotDotLine: dasharray = '5, 5, 1, 5, 1, 5'
+        else: dasharray = "none"
         return f'stroke:{color_str};stroke-width:{width};stroke-dasharray:{dasharray}'
 
-    def brush_to_svg(self, brush: QBrush):
+    def brush_to_svg(self, brush: QBrush, defs: dict):
+        """
+        --- Limitations ---
+        Only a couple fill patterns supported
+        """
         brush_style = brush.style()
-        print(brush_style)
         color = brush.color()
-
+        r, g, b = color.red(), color.green(), color.blue()
         if brush_style == Qt.BrushStyle.SolidPattern:
-            svg = f'fill:rgb({color.red()}, {color.green()}, {color.blue()});fill-opacity:{color.alpha() / 255.0}'
-            print(svg, "Brush svg")
+            svg = f'fill:rgb({r}, {g}, {b});fill-opacity:{int(color.alpha() / 255.0)}'
         elif brush_style == Qt.BrushStyle.Dense1Pattern:
-            svg = f'fill:url(#dense1Pattern)'
+            defs_svg = build_dense_pattern_svg(color, 1)
+            id = f"{r}-{g}-{b}-{color.alpha()}-dense1Pattern"
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.Dense2Pattern:
-            svg = f'fill:url(#dense2Pattern)'
+            defs_svg = build_dense_pattern_svg(color, 1)
+            id = f"{r}-{g}-{b}-{color.alpha()}-dense2Pattern"
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.Dense3Pattern:
-            svg = f'fill:url(#dense3Pattern)'
+            defs_svg = build_dense_pattern_svg(color, 1)
+            id = f"{r}-{g}-{b}-{color.alpha()}-dense3Pattern"
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.Dense4Pattern:
-            svg = f'fill:url(#dense4Pattern)'
+            defs_svg = build_dense_pattern_svg(color, 1)
+            id = f"{r}-{g}-{b}-{color.alpha()}-dense4Pattern"
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.Dense5Pattern:
-            svg = f'fill:url(#dense5Pattern)'
+            defs_svg = build_dense_pattern_svg(color, 1)
+            id = f"{r}-{g}-{b}-{color.alpha()}-dense5Pattern"
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.Dense6Pattern:
-            svg = f'fill:url(#dense6Pattern)'
+            defs_svg = build_dense_pattern_svg(color, 1)
+            id = f"{r}-{g}-{b}-{color.alpha()}-dense6Pattern"
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.Dense7Pattern:
-            svg = f'fill:url(#dense7Pattern)'
+            defs_svg = build_dense_pattern_svg(color, 1)
+            id = f"{r}-{g}-{b}-{color.alpha()}-dense7Pattern"
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.HorPattern:
-            svg = 'fill:url(#horPattern)'
+            id = f"{r}-{g}-{b}-{color.alpha()}-horPattern"
+            defs_svg = build_hor_pattern_svg(color, id)
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.VerPattern:
-            svg = 'fill:url(#verPattern)'
+            id = f"{r}-{g}-{b}-{color.alpha()}-verPattern"
+            defs_svg = build_ver_pattern_svg(color, id)
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.CrossPattern:
-            svg = 'fill:url(#crossPattern)'
+            id = f"{r}-{g}-{b}-{color.alpha()}-crossPattern"
+            defs_svg = build_cross_pattern_svg(color, id)
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.BDiagPattern:
-            svg = 'fill:url(#bDiagPattern)'
+            id = f"{r}-{g}-{b}-{color.alpha()}-bDiagPattern"
+            defs_svg = build_bdiag_pattern_svg(color, id)
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.FDiagPattern:
-            svg = 'fill:url(#fDiagPattern)'
+            id = f"{r}-{g}-{b}-{color.alpha()}-fDiagPattern"
+            defs_svg = build_fdiag_pattern_svg(color, id)
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
         elif brush_style == Qt.BrushStyle.DiagCrossPattern:
-            svg = 'fill:url(#diagCrossPattern)'
-        elif brush_style == Qt.BrushStyle.LinearGradientPattern:
-            # Additional code needed to handle gradients
-            svg = 'fill:url(#linearGradient)'  # Define gradient in <defs>
-        elif brush_style == Qt.BrushStyle.RadialGradientPattern:
-            # Additional code needed to handle gradients
-            svg = 'fill:url(#radialGradient)'  # Define gradient in <defs>
-        elif brush_style == Qt.BrushStyle.ConicalGradientPattern:
-            # Additional code needed to handle gradients
-            svg = 'fill:url(#conicalGradient)'  # Define gradient in <defs>
-        elif brush_style == Qt.BrushStyle.TexturePattern: # TODO Implement at some point?
-            svg = 'fill:none'
-#            texture = brush.texture()
-#            byte_array = QByteArray()
-#            buffer = QBuffer(byte_array)
-#            buffer.open(QIODevice.WriteOnly)
-#            texture.save(buffer, 'PNG')
-#            base64_data = b64encode(byte_array.data()).decode('utf-8')
-#            svg = (f'fill:url(#texturePattern);" '
-#                f'<defs>'
-#                f'<pattern id="texturePattern" patternUnits="userSpaceOnUse" width="{texture.width()}" height="{texture.height()}">'
-#                f'<image xlink:href="data:image/png;base64,{base64_data}" x="0" y="0" width="{texture.width()}" height="{texture.height()}" />'
-#                f'</pattern>'
-#                f'</defs>')Pattern:
-#            svg =''
-        else:
-            svg = 'fill:none'
+            id = f"{r}-{g}-{b}-{color.alpha()}-diagCrossPattern"
+            defs_svg = build_diagcross_pattern_svg(color, id)
+            defs[id] = defs_svg
+            svg = f'fill:url(#{id})'
+        else: svg = 'fill:none'
         return svg
 
     def copy_brush(self, brush: QBrush):
+        """ Brush textures are not supported """
         new_brush = QBrush()
         new_brush.setColor(brush.color())
         new_brush.setStyle(brush.style())
-
-        if brush.style() == Qt.BrushStyle.SolidPattern:
-            # No additional properties for solid brushes
-            pass
-        elif brush.style() == Qt.BrushStyle.TexturePattern:
-            new_brush.setTexture(brush.texture())
-        # Add other brush styles if needed
         return new_brush
 
     @classmethod
@@ -141,13 +135,28 @@ class DeepCopyableGraphicsItem(QGraphicsItem):
         dx, dy = transform.dx(), transform.dy()
         return f'matrix({m11} {m12} {m21} {m22} {dx} {dy})'
 
+class DeepCopyableLineABC(DeepCopyableItemABC):
+    @abstractmethod
+    def setLine(self, *args) -> None: ...
+    @abstractmethod
+    def setPen(self, pen: QPen) -> None: ...
+    @abstractmethod
+    def line(self) -> QLineF: ...
+
+class DeepCopyableShapeABC(DeepCopyableItemABC):
+    @abstractmethod
+    def setRect(self, rect: QRectF) -> None: ...
+    @abstractmethod
+    def boundingRect(self) -> QRectF: ...
+
+
 class StoringQSvgRenderer(QSvgRenderer):
     """ Wrapper for QSvgRenderer that stores data used to create renderer """
     def __init__(self, contents: QByteArray, parent = None):
         super().__init__(contents, parent=parent)
         self.svg_contents = contents.data().decode('utf-8')
 
-class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
+class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableItemABC):
     """ Wrapper for QGraphicsSvgItem that supports deepcopying and conversion to valid SVG code that can be included in a SVG document """
 
     def __init__(self, data: None | StoringQSvgRenderer | str = None, parent=None):
@@ -173,7 +182,6 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
             return ""
         body = self.svg_data
 
-
         xml_declaration_pattern_contents = r'<\?xml\s+version="([^"]+)"\s+encoding="([^"]+)"\s+standalone="([^"]+)"\?>'
         doctype_pattern_contents = r'<!DOCTYPE\s+svg\s+PUBLIC\s+"([^"]+)"\s+"([^"]+)">'
         xml_declaration_match = re.search(xml_declaration_pattern_contents, self.svg_data)
@@ -196,7 +204,6 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
         doctype_pattern = r'<!DOCTYPE[^>]*>'
         body = re.sub(xml_declaration_pattern, "", body)
         body = re.sub(doctype_pattern, "", body)
-        # Transform svg item to reflect its scene position instead of relative position
         return body
 
     def setSharedRenderer(self, renderer: StoringQSvgRenderer): # type: ignore
@@ -216,7 +223,7 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
         svg_item.setTransform(self.transform())
         return svg_item
 
-    def to_svg(self):
+    def to_svg(self, defs: dict):
         transform_svg = self.transform_to_svg(self.sceneTransform())
         body = self.svg_body()
         xml_info = []
@@ -231,14 +238,20 @@ class DeepCopyableSvgItem(QGraphicsSvgItem, DeepCopyableGraphicsItem):
                 f'</g>\n'
                 )
 
-class DeepCopyableEllipseItem(QGraphicsEllipseItem, DeepCopyableGraphicsItem):
+class DeepCopyableEllipseItem(QGraphicsEllipseItem, DeepCopyableShapeABC):
     """ Wrapper for QGraphicsEllipseItem that supports deepcopy """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def to_svg(self):
+    def boundingRect(self) -> QRectF:
+        return super().boundingRect()
+
+#    def setRect(self, rect: QRectF):
+#        super().setRect(rect)
+
+    def to_svg(self, defs: dict):
         pen_svg = self.pen_to_svg(self.pen())
-        brush_svg = self.brush_to_svg(self.brush())
+        brush_svg = self.brush_to_svg(self.brush(), defs)
         rect = self.rect()
         transform = self.sceneTransform()
         transform_svg = self.transform_to_svg(transform)
@@ -254,7 +267,6 @@ class DeepCopyableEllipseItem(QGraphicsEllipseItem, DeepCopyableGraphicsItem):
         else:
             new_rect = self.rect()
         new_item = DeepCopyableEllipseItem(new_rect)
-
         new_item.setPen(self.copy_pen(self.pen()))
         new_item.setBrush(self.copy_brush(self.brush()))
         new_item.setPos(self.pos())
@@ -265,13 +277,16 @@ class DeepCopyableEllipseItem(QGraphicsEllipseItem, DeepCopyableGraphicsItem):
         new_item.setFlags(self.flags())
         return new_item
 
-class DeepCopyableRectItem(QGraphicsRectItem, DeepCopyableGraphicsItem):
+class DeepCopyableRectItem(QGraphicsRectItem, DeepCopyableShapeABC):
     """ Wrapper for QGraphicsRectItem that supports deepcopy """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def to_svg(self):
-        brush_svg = self.brush_to_svg(self.brush())
+    def boundingRect(self):
+        return super().boundingRect()
+
+    def to_svg(self, defs: dict):
+        brush_svg = self.brush_to_svg(self.brush(), defs)
         pen_svg = self.pen_to_svg(self.pen())
         transform = self.sceneTransform()
         transform_svg = self.transform_to_svg(transform)
@@ -282,14 +297,12 @@ class DeepCopyableRectItem(QGraphicsRectItem, DeepCopyableGraphicsItem):
                 f'  {item_svg}\n'
                 f'</g>\n')
 
-
     def __deepcopy__(self, memo) -> DeepCopyableRectItem:
         if (parent := self.parentItem()):
             new_rect = parent.mapRectFromParent(self.rect())
         else:
             new_rect = self.rect()
         new_item = DeepCopyableRectItem(new_rect)
-
         new_item.setPen(self.copy_pen(self.pen()))
         new_item.setBrush(self.copy_brush(self.brush()))
         new_item.setTransform(self.transform())
@@ -300,12 +313,12 @@ class DeepCopyableRectItem(QGraphicsRectItem, DeepCopyableGraphicsItem):
         new_item.setFlags(self.flags())
         return new_item
 
-class DeepCopyableLineItem(QGraphicsLineItem, DeepCopyableGraphicsItem):
+class DeepCopyableLineItem(QGraphicsLineItem, DeepCopyableLineABC):
     """ Wrapper for QGraphicsLineItem that supports deepcopy """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def to_svg(self):
+    def to_svg(self, defs: dict):
         pen_svg = self.pen_to_svg(self.pen())
         line = self.line()
         transform = self.sceneTransform()
@@ -321,7 +334,6 @@ class DeepCopyableLineItem(QGraphicsLineItem, DeepCopyableGraphicsItem):
             new_line = QLineF(parent.mapFromParent(self.line().p1()), parent.mapFromParent(self.line().p2()))
         else:
             new_line = self.line()
-
         new_item = DeepCopyableLineItem(new_line)
         new_item.setPen(self.copy_pen(self.pen()))
         new_item.setTransform(self.transform())
@@ -332,7 +344,7 @@ class DeepCopyableLineItem(QGraphicsLineItem, DeepCopyableGraphicsItem):
         new_item.setFlags(self.flags())
         return new_item
 
-class DeepCopyablePathItem(QGraphicsPathItem, DeepCopyableGraphicsItem):
+class DeepCopyablePathItem(QGraphicsPathItem, DeepCopyableItemABC):
     """ Wrapper for QGraphicsPathItem that supports deepcopy """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -361,9 +373,9 @@ class DeepCopyablePathItem(QGraphicsPathItem, DeepCopyableGraphicsItem):
             raise ValueError("Invalid Svg format: no <svg> tags found")
         return svg_doc[start:end]
 
-    def to_svg(self) -> str:
+    def to_svg(self, defs: dict) -> str:
         pen_svg = self.pen_to_svg(self.pen())
-        brush_svg = self.brush_to_svg(self.brush())
+        brush_svg = self.brush_to_svg(self.brush(), defs)
         path_svg = self._path_to_svg()
         path_element_svg = f'<path style="{pen_svg};{brush_svg}" d="{path_svg}"/>'
         transform = self.sceneTransform()
@@ -414,7 +426,7 @@ class ClippedTextItem(QGraphicsTextItem):
         if event.button() == Qt.MouseButton.LeftButton and self.toPlainText() == self.text:
             self.setPlainText("")
 
-class DeepCopyableTextbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
+class DeepCopyableTextbox(QGraphicsRectItem, DeepCopyableItemABC):
     # TODO: Allow for no clip rect
     default_message = "Text.."
 
@@ -429,7 +441,6 @@ class DeepCopyableTextbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
         self.text_item.setPos(self.rect().topLeft())
         # This is a temporary fix. When the item is copied and then added to scene the text does not appear. It seems that super().setRect(*args) in setRect() needs to be called for text to display...
         self.setRect(self.rect())
-
 
     def setRect(self, *args, **kwargs):
         super().setRect(*args, **kwargs)
@@ -481,7 +492,7 @@ class DeepCopyableTextbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
         """ Returns textbox content as plain text """
         return self.text_item.toPlainText()
 
-    def to_svg(self) -> str:
+    def to_svg(self, defs: dict) -> str:
         font_item = self.text_item.font()
         rect = self.rect()
         transform = self.sceneTransform()
@@ -501,11 +512,11 @@ class DeepCopyableTextbox(QGraphicsRectItem, DeepCopyableGraphicsItem):
         return new_item
 
 
-class DeepCopyableItemGroup(QGraphicsItemGroup, DeepCopyableGraphicsItem):
+class DeepCopyableItemGroup(QGraphicsItemGroup, DeepCopyableItemABC):
     """ Wrapper for QGraphicsItemGroup that supports deepcopy """
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
+        raise NotImplementedError
+#        super().__init__(*args, **kwargs)
 
 #    def __deepcopy__(self) -> DeepCopyableItemGroup:
 #        scene = self.scene()
@@ -515,16 +526,16 @@ class DeepCopyableItemGroup(QGraphicsItemGroup, DeepCopyableGraphicsItem):
 #            item_copy = deepcopy(item)
 #            group.addToGroup(item_copy)
 
-    def to_svg(self):
-        transform = self.sceneTransform()
-        transform_svg = self.transform_to_svg(transform)
-        item_svg = ""
-        for item in self.childItems():
-            print(item, "child item group")
-            if hasattr(item, "to_svg"):
-                to_svg = getattr(item, "to_svg")
-                item_svg += to_svg() + '\n'
-
-        return (f'<g transform="{transform_svg}">\n'
-                f'  {item_svg}\n'
-                f'</g>\n')
+#    def to_svg(self, defs: dict):
+#        transform = self.sceneTransform()
+#        transform_svg = self.transform_to_svg(transform)
+#        item_svg = ""
+#        for item in self.childItems():
+#            print(item, "child item group")
+#            if hasattr(item, "to_svg"):
+#                to_svg = getattr(item, "to_svg")
+#                item_svg += to_svg() + '\n'
+#
+#        return (f'<g transform="{transform_svg}">\n'
+#                f'  {item_svg}\n'
+#                f'</g>\n')

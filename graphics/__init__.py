@@ -1,9 +1,11 @@
 from .selectable_rect import SelectableRectItem
-from .wrappers import (DeepCopyableGraphicsItem, StoringQSvgRenderer, DeepCopyableSvgItem, DeepCopyableEllipseItem,DeepCopyableGraphicsItem,
-                       DeepCopyableRectItem, DeepCopyableLineItem, DeepCopyablePathItem, DeepCopyableTextbox, DeepCopyableItemGroup)
+from .wrappers import (DeepCopyableItemABC, StoringQSvgRenderer, DeepCopyableSvgItem, DeepCopyableEllipseItem,DeepCopyableItemABC,
+                       DeepCopyableRectItem, DeepCopyableLineItem, DeepCopyablePathItem, DeepCopyableTextbox, DeepCopyableItemGroup,
+                       DeepCopyableLineABC, DeepCopyableShapeABC)
+from .items import DeepCopyableArrowItem
 __all__ = [
         "SelectableRectItem",
-        "DeepCopyableGraphicsItem",
+        "DeepCopyableItemABC",
         "StoringQSvgRenderer",
         "DeepCopyableSvgItem",
         "DeepCopyableEllipseItem",
@@ -12,5 +14,8 @@ __all__ = [
         "DeepCopyablePathItem",
         "DeepCopyableTextbox",
         "DeepCopyableItemGroup",
-        "DeepCopyableGraphicsItem"
+        "DeepCopyableItemABC",
+        "DeepCopyableLineABC",
+        "DeepCopyableArrowItem",
+        "DeepCopyableShapeABC"
         ]
