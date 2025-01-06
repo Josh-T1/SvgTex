@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from PyQt6.QtGui import QBrush, QKeySequence, QMouseEvent, QPen, QPainterPath, QShortcut
-from PyQt6.QtCore import QLine, QPointF, Qt, pyqtBoundSignal, QRectF, QLineF
+from PyQt6.QtGui import QBrush, QMouseEvent, QPen, QPainterPath
+from PyQt6.QtCore import QPointF, Qt, pyqtBoundSignal, QRectF, QLineF
 from PyQt6.QtWidgets import (QGraphicsItem, QGraphicsPathItem, QGraphicsView, QGraphicsScene, QGraphicsRectItem)
-from ..graphics import (DeepCopyableEllipseItem, DeepCopyableLineItem, DeepCopyablePathItem, DeepCopyableRectItem, SelectableRectItem, DeepCopyableTextbox, DeepCopyableArrowItem,
-                        DeepCopyableItemABC, DeepCopyableLineABC, DeepCopyableShapeABC)
+from ..graphics import (DeepCopyableEllipseItem, DeepCopyableLineItem, DeepCopyablePathItem, DeepCopyableRectItem, SelectableRectItem, DeepCopyableTextbox,
+                        DeepCopyableArrowItem, DeepCopyableLineABC)
 from typing import Protocol
-# GraphicsItems with size smaller than tolerence will be discarded from scene. Assumed to be 'miss click' items
-TOLERENCE = 10
+
+TOLERENCE = 10 # GraphicsItems with width or height less than tolerence will be discarded from scene. Assumed to be 'miss click' items
 
 class DrawingHandler(ABC):
     """ Abstact base class for drawing handlers """
@@ -100,7 +100,7 @@ class TextboxDrawingHandler(DrawingHandler):
             if self.rect_item is None:
                 self.rect_item = DeepCopyableTextbox(rect)
                 self.rect_item.moving = True
-                scene.addItem(self.rect_item)
+                scene.addItem(self.rect_item) # type: ignore -> impossible for scene to be none in our app
             else:
                 self.rect_item.setRect(rect)
 
@@ -278,7 +278,6 @@ class FreeHandDrawingHandler(DrawingHandler):
         """ Returns true if event took place within the bounds of scene """
         return scene.sceneRect().contains(event.position())
 
-
 class ConnectedLineHandler(DrawingHandler):
     connection_zones: list[QPointF] = []
     radius = 5
@@ -288,11 +287,12 @@ class ConnectedLineHandler(DrawingHandler):
         self.drawing = False
         self.current_line = None
         self.start_point = None
+        self._tolerance = 15
 
     @classmethod
     def _add_connection_zone(cls, pos: QPointF):
         """
-        pos: scene position
+        pos: position in scene coordinates
         """
         cls.connection_zones.append(pos)
 
@@ -304,35 +304,62 @@ class ConnectedLineHandler(DrawingHandler):
     def attempt_connection(cls, pos: QPointF) -> None | QPointF:
         for point in cls.connection_zones:
             if cls._euclid_distance(point, pos) < cls.radius:
-                return QPointF(point.x(), point.y()) # is this necessary?
+                return point
 
     def mousePress(self, view: QGraphicsView, event: QMouseEvent, pen: QPen) -> None:
-        # End drawing
-        if self.drawing and self.start_point is not None and self.current_line is not None:
-            end_point = view.mapToScene(event.position().toPoint())
-            self.current_line.setLine(QLineF(self.start_point, end_point))
-            self.reset()
-            return
-        # Start drawing
         scene = view.scene()
         if scene is None:
-            return
+            return None
+
         if event.button() == Qt.MouseButton.LeftButton:
-            self.drawing = True
-            self.start_point = view.mapToScene(event.position().toPoint())
-            self.current_line = DeepCopyableLineItem()
-            self.current_line.setPen(pen)
-            scene.addItem(self.current_line)
-            self.current_line.setZValue(self.max_z_value(scene))
+            # End drawing
+            if self.drawing and self.start_point is not None and self.current_line is not None:
+                self._end_drawing(self.current_line, scene)
+
+            self._init_drawing(view, scene, event, pen)
+
 
     def mouseMove(self, view: QGraphicsView, event: QMouseEvent, pen: QPen) -> None:
         if self.start_point is not None and self.current_line is not None and self.drawing:
             event_pos = view.mapToScene(event.position().toPoint())
-            self.current_line.setLine(QLineF(self.start_point, event_pos))
+            maybe_point = self.attempt_connection(event_pos)
+            if maybe_point is not None and self.current_line.line().length() > self._tolerance:
+                scene = view.scene()
+                if scene is None:
+                    return None
+                self.connection_zones.append(self.current_line.line().p2())
+                self.current_line.setLine(QLineF(self.start_point, maybe_point))
+                self._end_drawing(self.current_line, scene)
+                self._init_drawing(view, scene, event, pen)
+            else:
+                self.current_line.setLine(QLineF(self.start_point, event_pos))
 
     def mouseRelease(self, view, event, pen):
         return
-    def reset(self):
+
+    def _end_drawing(self, line_item, scene):
+        selectable_rect = SelectableRectItem(line_item, select_signal=self.handler_signal)
+        scene.addItem(selectable_rect)
+
+    def _init_drawing(self, view, scene, event, pen):
+        self.drawing = True
+        event_scene_pos = view.mapToScene(event.position().toPoint())
+        maybe_point = self.attempt_connection(event_scene_pos)
+        if maybe_point is not None:
+            self.start_point = maybe_point
+        else:
+            self.start_point = event_scene_pos
+            self.connection_zones.append(event_scene_pos)
+
+        self.start_point = maybe_point if maybe_point is not None else event_scene_pos
+        self.current_line = DeepCopyableLineItem()
+        self.current_line.setPen(pen)
+        scene.addItem(self.current_line)
+        self.current_line.setZValue(self.max_z_value(scene))
+
+    def reset(self, scene):
         self.drawing = False
+        if self.current_line is not None:
+            scene.removeItem(self.current_line)
+            self.current_line = None
         self.start_point = None
-        self.current_line = None

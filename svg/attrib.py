@@ -4,6 +4,22 @@ from PyQt6.QtCore import Qt
 from lxml import etree
 import re
 
+"""
+Current approach for setting svg item tools
+
+1. Attempt to "build" from attributes keys. For example, we get a stroke width
+using attrib_dict.get("stroke_width", fallback).
+
+2. Parse and set "style" attributes. Any attributes set here will override values set in part 1.
+
+
+TODO:
+    1. Allow for parsing of more complex commands
+"""
+
+
+brush_defaults = {"fill": None, "stroke": "black", "stroke-width": None, "stroke-linecap": None}
+
 def tools_from_attrib(attrib: etree._Element.attrib) -> tuple[QPen, QBrush]:
     pen, brush = QPen(QColor("white")), QBrush(Qt.BrushStyle.SolidPattern)
     pen = build_pen_from_attrib(attrib, pen)
@@ -12,10 +28,9 @@ def tools_from_attrib(attrib: etree._Element.attrib) -> tuple[QPen, QBrush]:
     return pen, brush
 
 def build_pen_from_attrib(attrib: etree._Element.attrib, pen: QPen) -> QPen:
-    _defaults = {"fill": None, "stroke": "black", "stroke-width": None, "stroke-linecap": None}
-    stroke_color = attrib.get('stroke', _defaults["stroke"])
-    stroke_width = attrib.get('stroke-width', _defaults["stroke-width"])
-    stroke_linecap = attrib.get('stroke-linecap', _defaults["stroke-linecap"])
+    stroke_color = attrib.get('stroke', brush_defaults["stroke"])
+    stroke_width = attrib.get('stroke-width', brush_defaults["stroke-width"])
+    stroke_linecap = attrib.get('stroke-linecap', brush_defaults["stroke-linecap"])
     if stroke_color: pen.setColor(QColor(stroke_color))
     if stroke_width: pen.setWidthF(float(stroke_width))
     # Apply stroke line cap style to QPen
@@ -26,19 +41,19 @@ def build_pen_from_attrib(attrib: etree._Element.attrib, pen: QPen) -> QPen:
     return pen
 
 def build_brush_from_attrib(attrib: etree._Element.attrib, brush: QBrush) -> QBrush:
-    # name vs rgb handle both
     fill_color = attrib.get('fill', "none")
-    fill_opacity = attrib.get("fill-opacity", 255)
+    fill_opacity = attrib.get("fill-opacity", 1.0)
     if "rgb" in fill_color:
         contents = fill_color.split("(")[1].split(")")[0]
-        contents_clean = [i.strip() for i in contents.split(",")]
-        if len(contents_clean) == 3:
-            r, g, b = contents_clean
-            brush.setColor(QColor(int(r), int(g), int(b), int(fill_opacity)))
-        elif len(contents_clean) == 4:
-            r, g, b, opacity = contents_clean
-            brush.setColor(QColor(int(r), int(g), int(b), int(opacity)))
-    else:
+        contents_clean: list = [int(i.strip()) for i in contents.split(",")] # stupid language server gives warning without type hint
+        if len(contents_clean) == 3: #
+            contents_clean.append(float(fill_opacity))
+
+        r, g, b, opacity = contents_clean
+        color = QColor(r, g, b)
+        color.setAlphaF(opacity)
+        brush.setColor(color)
+    else: # we assume that "rgb" not in fill color then fill color is specified by name or "none". I believe "none" is used in .svg file, hence default is "none" not "transparent"
         if fill_color != "none": # for some reason ```brush = QBrush(); brush.setColor(QColor("black"))``` does not work.. tmp fix
             brush.setColor(QColor(fill_color))
         else:
@@ -47,7 +62,6 @@ def build_brush_from_attrib(attrib: etree._Element.attrib, brush: QBrush) -> QBr
 
 def build_tools_from_style(style: str, pen: QPen, brush: QBrush) -> tuple[QPen, QBrush]:
     properties = style.split(';')
-
     for prop in properties:
         if ':' not in prop:
             continue
@@ -78,26 +92,28 @@ def build_tools_from_style(style: str, pen: QPen, brush: QBrush) -> tuple[QPen, 
                 elif pattern_id == "bDiagPattern": brush.setStyle(Qt.BrushStyle.BDiagPattern)
                 elif pattern_id == "fDiagPattern": brush.setStyle(Qt.BrushStyle.FDiagPattern)
                 elif pattern_id == "diagCrossPattern": brush.setStyle(Qt.BrushStyle.DiagCrossPattern)
-                brush.setColor(QColor(int(r), int(g), int(b), int(opacity)))
+                color = QColor(int(r), int(g), int(b))
+                color.setAlphaF(float(opacity))
+                brush.setColor(color)
             else:
                 if "rgb" in value:
                     contents = value.split("(")[1].split(")")[0]
-                    contents_clean = [i.strip() for i in contents.split(",")]
+                    contents_clean: list = [int(i.strip()) for i in contents.split(",")]
                     if len(contents_clean) == 3:
-                        r, g, b = contents_clean
-                        brush.setColor(QColor(int(r), int(b), int(g)))
-                        brush.setStyle(Qt.BrushStyle.SolidPattern)
-                    elif len(contents_clean) == 4:
-                        r, g, b, opacity = contents_clean
-                        brush.setColor(QColor(int(r), int(b), int(g), int(opacity)))
-                        brush.setStyle(Qt.BrushStyle.SolidPattern)
+                        contents_clean.append(1.0)
+                    r, g, b, opacity = contents_clean
+                    color = QColor(r, g, b)
+                    color.setAlphaF(opacity)
+                    brush.setStyle(Qt.BrushStyle.SolidPattern)
                 else:
                     brush.setColor(QColor(value))
                     brush.setStyle(Qt.BrushStyle.SolidPattern)
 
-        elif key == "fill_opacity":
+        elif key == "fill-opacity":
             r, g, b = brush.color().red(), brush.color().green(), brush.color().blue()
-            brush.setColor(QColor(int(r), int(g), int(b), int(value)))
+            color = QColor(r, b, g)
+            color.setAlphaF(float(value))
+            brush.setColor(color)
 
         elif key == 'stroke': pen.setColor(QColor(value))
         elif key == 'stroke-width': pen.setWidthF(float(value))
@@ -111,12 +127,13 @@ def build_tools_from_style(style: str, pen: QPen, brush: QBrush) -> tuple[QPen, 
             elif value == "1, 5": pen.setStyle(Qt.PenStyle.DotLine)
             elif value == "5, 5, 1, 5": pen.setStyle(Qt.PenStyle.DashDotLine)
             elif value == "5, 5, 1, 5, 1, 5": pen.setStyle(Qt.PenStyle.DashDotLine)
+
     return pen, brush
 
 def parse_d_attribute(d_attr: str) -> QPainterPath:
     """ Parses d attribute belonging to an svg path tag
     returns: painter path object
-    TODO: Currently only 'simple' paths are parsed. We do not handle arcs or relative commands
+    TODO: Currently only 'simple' paths are parsed. Unable to handle arcs or relative commands
         """
     path = QPainterPath()
     commands = re.findall(r'[MLCZQz]|-?\d+\.?\d*', d_attr)

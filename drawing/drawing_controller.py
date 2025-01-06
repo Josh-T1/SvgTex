@@ -7,7 +7,7 @@ from ..utils import Handlers, Tools
 class DrawingController(QObject):
     """
     Accepts QMouseEvents and QKeyEvent. QKeyEvent's are passed to ShortcutManager object and QMouseEvents are passed to DrawingHandler.
-    Class properties such as 'tool' or 'handler' are updated by connecting their respective set{property} method to other QWidget signals. These
+    Class properties such as 'tool' or 'handler' are updated by connecting their respective set{Property} method to other QWidget signals. These
     properties are then used to alter the behaviour of DrawingHandler objects
     """
 
@@ -73,7 +73,6 @@ class DrawingController(QObject):
     def setPenColor(self, color: QColor):
         self.pen.setColor(color)
 
-
     def setFill(self, color: QColor):
         self.brush.setColor(color)
 
@@ -104,11 +103,9 @@ class DrawingController(QObject):
             handler_inst = class_obj()
         self.setHandler(handler_inst)
 
-    def _interupt_shortcut(self):
-        reset = getattr(self.handler, "reset", None)
-        if callable(reset):
-            reset()
-
-    def bind_reset_shortcut(self, view):
-        shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), view)
-        shortcut.activated.connect(self._interupt_shortcut)
+    def reset_handler(self):
+        if self.scene_view is None or (scene := self.scene_view.scene()) is None:
+            return
+        reset_method = getattr(self.handler, "reset", None)
+        if callable(reset_method):
+            reset_method(scene)

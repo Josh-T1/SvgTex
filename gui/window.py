@@ -1,16 +1,13 @@
 from collections.abc import Callable
+import subprocess
 from copy import deepcopy
 from typing import Literal, Optional, Pattern
 from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QColor, QCursor, QGuiApplication, QIcon, QKeyEvent, QKeySequence, QMouseEvent, QPaintEvent, QPainterPath, QPen, QPainter, QPixmap, QTransform
 from PyQt6.QtCore import QByteArray, QKeyCombination, QLineF, QPointF, QRect, Qt, QRectF, pyqtBoundSignal, pyqtSignal, QEvent, QSize
-from PyQt6.QtSvg import QSvgGenerator, QSvgRenderer
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel,
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QDialog, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel, QLineEdit,
                              QMessageBox, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                              QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem, QGraphicsRectItem, QComboBox, QFormLayout, QStackedWidget)
-
-from ..graphics.wrappers import DeepCopyablePathItem, DeepCopyableRectItem
-from ..graphics.items import DeepCopyableArrowItem
 from ..drawing.drawing_controller import DrawingController
 from ..graphics import DeepCopyableSvgItem, StoringQSvgRenderer, DeepCopyableTextbox, SelectableRectItem, DeepCopyableItemGroup
 from collections import deque
@@ -20,8 +17,15 @@ from ..svg import scene_to_svg, SvgBuilder
 from ..utils import tex2svg, text_is_latex, Handlers, Tools
 logger = logging.getLogger(__name__)
 
-UNSAVED_NAME = "No Name **"
+UNSAVED_NAME = "Unsaved"
 MEDIA_PATH = Path(__file__).parent.parent / "media"
+
+def is_float(string: str):
+    try:
+        float(string)
+        return True
+    except ValueError:
+        return False
 
 class ShortcutCloseEvent(QCloseEvent):
     pass
@@ -135,6 +139,7 @@ class GraphicsView(QGraphicsView):
         super().__init__()
         self._controller =  controller
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self.setMouseTracking(True)
 
     def mousePressEvent(self, event):
         if self._controller and event:
@@ -161,7 +166,8 @@ class GraphicsView(QGraphicsView):
         if event is None:
             return
         if event.key() == Qt.Key.Key_Escape:
-            print("escape")
+            if self._controller is not None:
+                self._controller.reset_handler()
         super().keyPressEvent(event)
 
     def wheelEvent(self, event):
@@ -477,6 +483,21 @@ class ColorBar(QWidget):
         button.setFixedSize(QSize(self.btn_size_x, self.btn_size_y))
         self.second_row.addWidget(button)
 
+class LayersManager(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.layers_layout = QVBoxLayout()
+        self.layers_layout.setContentsMargins(0, 0, 0, 0)
+        self.initUi()
+        self.setLayout(self.layers_layout)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+    def initUi(self):
+#        self._create_widgets()
+#        self._configure_widgets()
+#        self._add_widgets()
+        self.setFixedWidth(150)
+
 
 class VToolBar(QWidget):
     """ Contains widgets related to customizing drawing tool.
@@ -539,43 +560,88 @@ class VToolBar(QWidget):
         self.toolbar_layout.addWidget(self.fill_color_selection)
         self.toolbar_layout.addWidget(self.selection_toggle)
 
-    def connectClickedTool(self, func: Callable):
-        self.tool_checkbox.clicked.connect(func)
-
-    def connectClickedPenWidth(self, func: Callable[[int], None]):
-        self.pen_size_selector.clicked.connect(func)
-
-    def connectToggleMenuButton(self, func: Callable[[], None]):
-        self.toggle_menu_button.clicked.connect(func)
-
-    def connectColorSelection(self, func: Callable[[QColor], None]):
-        self.color_selection.clicked.connect(func)
-
-    def connectFillColorSelection(self, func: Callable[[QColor], None]):
-        self.fill_color_selection.clicked.connect(func)
-
-    def connectToggleSelection(self, func: Callable[[QColor], None]):
-        self.selection_toggle.clicked.connect(func)
-
+    def connectClickedTool(self, func: Callable): self.tool_checkbox.clicked.connect(func)
+    def connectClickedPenWidth(self, func: Callable[[int], None]): self.pen_size_selector.clicked.connect(func)
+    def connectToggleMenuButton(self, func: Callable[[], None]): self.toggle_menu_button.clicked.connect(func)
+    def connectColorSelection(self, func: Callable[[QColor], None]): self.color_selection.clicked.connect(func)
+    def connectFillColorSelection(self, func: Callable[[QColor], None]): self.fill_color_selection.clicked.connect(func)
+    def connectToggleSelection(self, func: Callable[[QColor], None]): self.selection_toggle.clicked.connect(func)
     def getClickCallback(self, box_text: str):
         for box in self.check_boxes:
             if box.text() == box_text and not box.isChecked():
                 return box.click
         return None
 
+class ExportDialog(QDialog):
+    def __init__(self, filename: str, dir: str, dimensions: tuple[int, int]=(789, 558)):
+        """
+        dimensions: Svg dimensions in pixels
+        name: Export file name
+        """
+        super().__init__()
+        self.setWindowTitle("Confirm export attributes")
+        self.export_layout = QFormLayout()
+
+        self.setLayout(self.export_layout)
+        self.confirm_button = QPushButton("Export", self)
+        self.cancel_button = QPushButton("Cancel", self)
+        self.container_widget = QWidget(self)
+        container_2_widget = QWidget(self)
+        container_2_layout = QHBoxLayout(container_2_widget)
+        self.dir = QLineEdit(self)
+        self.dir_tree = QPushButton("..",self)
+        container_2_layout.addWidget(self.dir)
+        container_2_layout.addWidget(self.dir_tree)
+        self.filename = QLineEdit(self)
+        self.width_input = QLineEdit(self)
+        self.height_input = QLineEdit(self)
+        self.export_type = QComboBox(self)
+        self.export_type.addItems(["pdf"])
+        self.width_input.setText(str(dimensions[0]))
+        self.height_input.setText(str(dimensions[1]))
+        self.filename.setText(filename)
+        self.dir.setFixedWidth(200)
+        self.dir_tree.setFixedWidth(25)
+        self.dir.setText(dir)
+        self.export_layout.addRow("Filename:", self.filename)
+        self.export_layout.addRow("Width:", self.width_input)
+        self.export_layout.addRow("Height:", self.height_input)
+        self.export_layout.addRow("Export Type: ", self.export_type)
+        container_layout = QHBoxLayout(self.container_widget)
+        self.export_layout.addRow(container_2_widget)
+        self.export_layout.addRow(self.container_widget)
+        container_layout.addWidget(self.cancel_button)
+        container_layout.addWidget(self.confirm_button)
+        self.cancel_button.clicked.connect(self.reject)
+        self.confirm_button.clicked.connect(self.accept)
+        self.dir_tree.clicked.connect(self.open_directory_dialog)
+
+    def open_directory_dialog(self):
+        selected_directory = QFileDialog.getExistingDirectory(
+                self, "Selected Directory", self.dir_tree.text()
+                )
+        if selected_directory:
+            self.dir.setText(selected_directory)
+
+    def get_export_info(self) -> dict:
+        return {"height": self.height_input.text(), "width": self.width_input.text(),
+                "export_type": self.export_type.currentText(), "filename": self.filename.text(),
+                "dir": self.dir.text()}
 
 class MainWindow(QMainWindow):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, height: int = 781, width: int = 561):
         """
         _filepath: path to svg file
         user_dir: location where script is launched
 
         """
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self._filepath: None | str = None
         self.user_dir: str | None = None
-        self.scene_default_width = 1052 * 0.75
-        self.scene_default_height = 744 * 0.75
+#        self.scene_width: int = int(1052 * 0.75)
+#        self.scene_height: int = int(744 * 0.75)
+        self.scene_width = height
+        self.scene_height = width
         self.initUi()
 
         shortcuts = self.set_default_shortcuts()
@@ -583,7 +649,7 @@ class MainWindow(QMainWindow):
             self.add_shortcut(*shortcut[:-1], **shortcut[-1])
 
     @property
-    def filepath(self):
+    def filepath(self) -> str | None:
         return self._filepath
 
     @filepath.setter
@@ -595,7 +661,7 @@ class MainWindow(QMainWindow):
     def filename(self):
         if self._filepath is None:
             return UNSAVED_NAME
-        return Path(self._filepath).name
+        return Path(self._filepath).stem
 
     def initUi(self):
         self.main_widget = QWidget()
@@ -613,31 +679,36 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
         save_action = QAction("Save", self)
         open_action = QAction("Open", self)
+        export_action = QAction("Export", self)
+        new_action = QAction("New", self)
         self.filename_widget = QLabel(self.filename)
 #        self.mode_label = ModeView()
         self.filename_widget.setStyleSheet('font-size: 16pt;')
         spacer = QWidget()
-        spacer.setFixedWidth(200)
+        spacer.setFixedWidth(150)
 
         toolbar.addAction(save_action)
+        toolbar.addAction(new_action)
         toolbar.addAction(open_action)
+        toolbar.addAction(export_action)
         toolbar.addWidget(spacer)
         toolbar.addWidget(self.filename_widget)
-        save_action.triggered.connect(self.set_file_path)
+        save_action.triggered.connect(self.save)
         open_action.triggered.connect(self._load_from_selection)
+        new_action.triggered.connect(self.new_canvas)
+        export_action.triggered.connect(self.export)
 
-
+    def new_canvas(self):
+        print("implement new canvas")
     def _create_widgets(self):
-
         self.graphics_view = GraphicsView()
 #        self.top_Ruler = RulerWidget("horizontal")
 #        self.side_Ruler = RulerWidget("vertical")
 #        self.top_Ruler.setParent(self.graphics_view.viewport())
 #        self.side_Ruler.setParent(self.graphics_view.viewport())
-
         self._scene = TexGraphicsScene()
-        self.tool_bar = VToolBar()
         self.toggle_menu = ToggleMenuWidget()
+        self.tool_bar = VToolBar()
         scroll_widget = QWidget()
         scroll_layout = QHBoxLayout(scroll_widget)
 #        scroll_layout.addWidget(self.side_Ruler)
@@ -646,6 +717,8 @@ class MainWindow(QMainWindow):
         self.scroll_area = ZoomableScrollArea(scroll_widget)
         self.scroll_area.setWidget(scroll_widget)
 
+    def switch_widgets(self):
+        self.stacked_widget.setCurrentIndex((self.stacked_widget.currentIndex() + 1) % 2)
 
     def _configure_widgets(self):
         self.toggle_menu.hide()
@@ -660,7 +733,7 @@ class MainWindow(QMainWindow):
         self.graphics_view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.graphics_view.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.IgnoreAspectRatio)
 
-        self._scene.setSceneRect(QRectF(0, 0, self.scene_default_width, self.scene_default_height)) # TODO
+        self._scene.setSceneRect(QRectF(0, 0, self.scene_width, self.scene_height)) # TODO
         self.scroll_area.setWidgetResizable(True)
 
         self.tool_bar.connectToggleSelection(SelectableRectItem.toggleEnabled)
@@ -668,8 +741,8 @@ class MainWindow(QMainWindow):
 
     def _add_widgets(self):
         self.main_layout.addWidget(self.scroll_area)
-        self.main_layout.addWidget(self.tool_bar)
         self.main_layout.addWidget(self.toggle_menu)
+        self.main_layout.addWidget(self.tool_bar)
 
     def setController(self, controller: DrawingController):
         """ set controller object and connect relevant signals """
@@ -683,17 +756,13 @@ class MainWindow(QMainWindow):
         self.toggle_menu.connectBrushStyle(controller.setBrushStyle)
         self.toggle_menu.connectPenStyle(controller.setPenStyle)
 
-#        tmp = DeepCopyableArrowItem(QLineF(QPointF(100, 100), QPointF(200, 200)))
-#        s = SelectableRectItem(tmp, self.graphics_view.controller().handler_signal)
-#        self._scene.addItem(s)
-
     @property
     def scene(self):
         return self.graphics_view.scene()
 
     def load_svg_as_svgItem(self, filepath: str):
         """
-        TODO: test
+        adds svg file to scene
         """
         with open(filepath, "rb") as f:
             file_bytes = f.read()
@@ -703,6 +772,66 @@ class MainWindow(QMainWindow):
         item.setSharedRenderer(renderer)
         self._scene.addItem(item)
 
+    def error_dialoge(self, error_msg: str):
+        msg_box = QMessageBox()
+        msg_box.setText(error_msg)
+        msg_box.setWindowTitle("Error")
+        msg_box.exec()
+
+    def export(self):
+        """
+        export svg image
+        """
+        if self.filepath is None or not Path(self.filepath).is_file():
+            self.error_dialoge("Svg file must be saved before exporting")
+            return
+
+        error_msg = ""
+        abort = False
+        dialog = ExportDialog(self.filename, str(Path.cwd()) ,dimensions=(self.scene_height, self.scene_width))
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        info = dialog.get_export_info()
+        height, width, name, export_type, dir = info["height"], info["width"], info["filename"], info["export_type"], Path(info["dir"])
+        valid_float = height.isdigit() and width.isdigit()
+
+        if not valid_float:
+            error_msg += f"\nDimensions must be valid integers\nInput height: {height}, width: {width} "
+        else:
+            height, width = int(height), int(width)
+            if not (0 < height < 1200) or not (0 < width < 1200): # 1200 arbitrarly chosen, TODO: pick better upper bound
+                error_msg += f"\nInvalid dimensions, valid dimensions are (0, 0) < (height, width) < (1200, 1200)\nInput: {height} {width}"
+
+        if not dir.is_dir():
+            error_msg += f"Invalid directory: {str(dir)}"
+
+        if "." not in name: # assuming no '.' in filename, e.g test.file.pdf
+            name = name + "." + export_type
+
+        output_file = dir / name
+        if output_file.is_file():
+            msg_box = QMessageBox()
+            msg_box.setText(f"The file: {str(output_file)} already exits. Would you like export anyways?")
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if msg_box.exec() == QMessageBox.StandardButton.No:
+                abort = True
+
+        if len(error_msg) != 0:
+            self.error_dialoge(error_msg)
+
+        elif abort is False:
+            command = [
+                    "inkscape",
+                    self.filepath,
+                    f"--export-height={height}",
+                    f"--export-filename={width}",
+                    f"--export-filename={output_file}"
+                    ]
+            result = subprocess.run(command, capture_output=True)
+            if result.returncode != 0:
+                self.error_dialoge(str(result.stderr))
+
     def _load_from_selection(self):
         # TODO empty arg is dir to check... how do I decide this? allow for sys.argv?
         file_path, _ = QFileDialog.getOpenFileName(self, "Open File", str(Path().cwd()), "SVG Files (*.svg)")
@@ -710,7 +839,6 @@ class MainWindow(QMainWindow):
             self.load_svg_as_svgItem(file_path)
 
     def closeEvent(self, event: QCloseEvent): #type: ignore
-        """ TODO: Make this better """
         if self.filename != UNSAVED_NAME:
             self.save()
             return
@@ -732,7 +860,7 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(self, "Confirm Close", "Do you want to save before closing?",
                                       QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
         if reply == QMessageBox.StandardButton.Save:
-            return_code = self.set_file_path()
+            return_code = self.save()
             if return_code == 0:
                 event.accept()
             else:
@@ -742,28 +870,20 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
-    def set_file_path(self):
-        if self._filepath is None:
-            self._filepath, _ = QFileDialog.getSaveFileName(self,
-                                                            "Save File",
-                                                            str(Path().cwd()),
-                                                            "SVG Files (*.svg)")
-
-        return_code = self.save()
-        if return_code == 1:
-            display_name = f"error while saving: {self._filepath}" if return_code == 1 else self._file_path.split("/")[-1]
-            self.filename_widget.setText(display_name)
-        return return_code
-
-    def save(self):
+    def save(self) -> int:
         """ Save svg """
-        if not isinstance(self._filepath, str) or self._filepath == "":
-            return 1
-        scene_to_svg(self._scene, self._filepath)
-        return 0
+        error_code = 0
+        if self._filepath is None:
+            self._filepath, _ = QFileDialog.getSaveFileName(self, "Save File", str(Path().cwd()), "SVG Files (*.svg)")
 
-    def build_svg(self):
-        pass
+        if not isinstance(self._filepath, str) or self._filepath == "": # TODO fix this. We want to know it is possible to write to self._filepath
+            error_msg = f"error while saving: {self._filepath}"
+            self.error_dialoge(error_msg)
+            error_code = 1
+        else:
+            scene_to_svg(self._scene, self._filepath)
+        self.filename_widget.setText(self.filepath)
+        return error_code
 
     def open_with_svg(self, filepath: str, user_dir: str | None = None):
         """ Loads svg and sets filename to svg name. Implements 'editing' functionality, the original svg will
@@ -785,13 +905,14 @@ class MainWindow(QMainWindow):
             handler = None
 
         for svg_item in svg_items:
-            svg_item.setFlag(QGraphicsSvgItem.GraphicsItemFlag.ItemClipsToShape, True) # Make background transparent
+            #svg_item.setFlag(QGraphicsSvgItem.GraphicsItemFlag.ItemClipsToShape, True) # Make background transparent
             if signal:
                 selectable_item = SelectableRectItem(svg_item, signal) # TODO
             else:
                 selectable_item = SelectableRectItem(svg_item) # TODO
             self._scene.addItem(selectable_item)
-        # hack to 'refresh' signals.. without this loaded graphic won't be selectable untill selector button is pressed again
+
+        # hack to 'refresh' signals.. without this loaded graphic won't be selectable untill selector button is pressed
         if handler and signal:
             signal.emit(handler.__class__.__name__)
 
