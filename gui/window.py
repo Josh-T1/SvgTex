@@ -17,6 +17,7 @@ from ..svg import scene_to_svg, SvgBuilder
 from ..utils import tex2svg, text_is_latex, Handlers, Tools
 logger = logging.getLogger(__name__)
 
+
 UNSAVED_NAME = "Unsaved"
 MEDIA_PATH = Path(__file__).parent.parent / "media"
 
@@ -628,6 +629,66 @@ class ExportDialog(QDialog):
                 "export_type": self.export_type.currentText(), "filename": self.filename.text(),
                 "dir": self.dir.text()}
 
+class NewCanvasDialog(QDialog):
+    """
+    TODO: allow for selection of save location
+    """
+    def __init__(self, dir: str, default_height: int=561, default_width: int=781):
+        super().__init__()
+        self.setWindowTitle("New Canvas")
+        self.main_layout = QFormLayout()
+        self.setLayout(self.main_layout)
+
+        self.filename = QLineEdit(self)
+        self.dir = QLineEdit(self)
+        self.dir_tree = QPushButton("..",self)
+        container_2_widget = QWidget(self)
+        container_2_layout = QHBoxLayout()
+        container_2_layout.addWidget(self.dir)
+        container_2_layout.addWidget(self.dir_tree)
+        self.dir.setFixedWidth(200)
+        self.dir_tree.setFixedWidth(25)
+        self.dir.setText(dir)
+
+        self.confirm_button = QPushButton("Confirm")
+        self.cancel_button = QPushButton("Cancel")
+        self.width_input = QLineEdit(self)
+        self.height_input = QLineEdit(self)
+
+
+        self.container = QWidget(self)
+        self.container_layout = QHBoxLayout()
+
+        self.container_layout.addWidget(self.confirm_button)
+        self.container_layout.addWidget(self.cancel_button)
+
+        self.main_layout.addRow("Filename: ", self.filename)
+        self.main_layout.addRow(container_2_widget)
+        self.main_layout.addRow("Width: ", self.width_input)
+        self.main_layout.addRow("Height: ", self.height_input)
+        self.main_layout.addWidget(self.container)
+        self.container.setLayout(self.container_layout)
+
+
+        self.confirm_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+        container_2_widget.setLayout(container_2_layout)
+        # config
+        self.dir_tree.clicked.connect(self.open_directory_dialog)
+        self.width_input.setText(str(default_width))
+        self.height_input.setText(str(default_height))
+
+    def get_options(self):
+        return (self.height_input.text(), self.width_input.text(), self.dir.text(),
+                self.filename.text())
+    def open_directory_dialog(self):
+        selected_directory = QFileDialog.getExistingDirectory(
+                self, "Selected Directory", self.dir_tree.text()
+                )
+        if selected_directory:
+            self.dir.setText(selected_directory)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, height: int = 781, width: int = 561):
         """
@@ -682,7 +743,6 @@ class MainWindow(QMainWindow):
         export_action = QAction("Export", self)
         new_action = QAction("New", self)
         self.filename_widget = QLabel(self.filename)
-#        self.mode_label = ModeView()
         self.filename_widget.setStyleSheet('font-size: 16pt;')
         spacer = QWidget()
         spacer.setFixedWidth(150)
@@ -699,7 +759,44 @@ class MainWindow(QMainWindow):
         export_action.triggered.connect(self.export)
 
     def new_canvas(self):
-        print("implement new canvas")
+        self.save()
+        error_msg = ""
+        abort = False
+        new_dialog = NewCanvasDialog(str(Path().cwd()))
+        if new_dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        height, width, dir, name= new_dialog.get_options()
+        dir = Path(dir)
+        valid_int = height.isdigit() and width.isdigit()
+
+        if not valid_int:
+            error_msg += f"\nDimensions must be valid integers\nInput height: {height}, width: {width} "
+        else:
+            height, width = int(height), int(width)
+            if not (0 < height < 1200) or not (0 < width < 1200): # 1200 arbitrarly chosen, TODO: pick better upper bound
+                error_msg += f"\nInvalid dimensions, valid dimensions are (0, 0) < (height, width) < (1200, 1200)\nInput: {height} {width}"
+        if not dir.is_dir():
+            error_msg += f"Invalid directory: {str(dir)}"
+
+        if "." not in name: # assuming no '.' in filename, e.g test.file.pdf
+            name = name + ".svg"
+
+        output_file = dir / name
+        if output_file.is_file():
+            msg_box = QMessageBox()
+            msg_box.setText(f"The file: {str(output_file)} already exits. Would you like export anyways?")
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if msg_box.exec() == QMessageBox.StandardButton.No:
+                abort = True
+
+        if len(error_msg) != 0:
+            self.error_dialoge(error_msg)
+        if not abort:
+            self._build_scene()
+            self.scene_height = height
+            self.scene_width = width
+            self._scene.setSceneRect(QRectF(0, 0, height, width))
+
     def _create_widgets(self):
         self.graphics_view = GraphicsView()
 #        self.top_Ruler = RulerWidget("horizontal")
@@ -716,6 +813,14 @@ class MainWindow(QMainWindow):
         scroll_layout.addWidget(self.graphics_view)
         self.scroll_area = ZoomableScrollArea(scroll_widget)
         self.scroll_area.setWidget(scroll_widget)
+
+    def _build_scene(self):
+        self._scene = TexGraphicsScene()
+        self._scene.setBackgroundBrush(QBrush(Qt.GlobalColor.white))
+        self.graphics_view.setScene(self._scene)
+        self.graphics_view.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.IgnoreAspectRatio)
+        self._scene.setSceneRect(QRectF(0, 0, self.scene_width, self.scene_height)) # TODO
+
 
     def switch_widgets(self):
         self.stacked_widget.setCurrentIndex((self.stacked_widget.currentIndex() + 1) % 2)

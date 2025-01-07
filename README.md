@@ -1,27 +1,30 @@
 # Vector Graphics Editor
-A minimalistic vector graphics editor designed for creating mathematical diagrams containing latex. Work in progress, use at your own risk.
+![veditor](assets/veditor.png)
+A minimalistic vector graphics editor designed for creating svg images containing LaTex.
 
 
-## Using latex in image
-Write the latex code surrounded by single `$`. Pressing `ctrl-c` will compile any latex inside of a text box, if latex compilation fails 
-you will get an pop up error. 
+## Tools
+* `Selector`: Used for selecting graphics items
+* `Textbox`: In addition to functioning as a standard text box, LaTex may be wrote, and compiled using the [shortcut](#shortcuts) `ctrl-c`.
+ The LaTex inside of the text box must be surrounded by single dollar signs, e.g `$\lambda$`. LaTex is compiled using matplotlib.
+* `Line`: Used to draw a straight line
+* `Pen`: Pen is set with a pen width and color, when a graphics item is clicked using this tool, its border is changed to the pens width
+and color.
+* `Brush`: Fills the background of a graphics item. Note that the rectangular gray button under fill color is the transparent option.
+* `Arrow`: Draws an arrow. (Currently broken)
+* `ConnectedLine`: TODO
 
-* What packages are supported?
-* Can users add new packages?
-* Comment on error message
-
-# Shortcuts
-1. These should not be cntrl, or atelast sum
+## Shortcuts
 * `ctrl-c`: compiles latex inside of text boxes.
-* `ctrl-l`: select line tool
-* `ctrl-t`: text box tool
-* `ctrl-r`: rectangle tool
-* `ctrl-b`: brush tool
-* `ctrl-p`: pen tool
-* `ctrl-s`: selector tool
-* `ctrl-n`: cycle through elements under cursor
-* `ctrl-v`: paste item
-* `ctrl-c`: copy item
+* `shift-l`: select line tool
+* `shift-t`: text box tool
+* `shift-r`: rectangle tool
+* `shift-b`: brush tool
+* `shift-p`: pen tool
+* `shift-s`: selector tool
+* `shift-n`: cycle through elements under cursor
+* `shift-v`: paste item
+* `shift-c`: copy item
 
 # Configuration
 In order to start the editor you must run `python -m main_gui.py`. Flags include
