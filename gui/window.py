@@ -1,15 +1,14 @@
 from collections.abc import Callable
 import subprocess
 from copy import deepcopy
-from typing import Literal, Optional, Pattern
-from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QColor, QCursor, QGuiApplication, QIcon, QKeyEvent, QKeySequence, QMouseEvent, QPaintEvent, QPainterPath, QPen, QPainter, QPixmap, QTransform
+from typing import Literal, Optional
+from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QColor, QCursor, QIcon, QKeyEvent, QKeySequence, QMouseEvent, QPaintEvent, QPainterPath, QPen, QPainter, QPixmap, QTransform
 from PyQt6.QtCore import QByteArray, QKeyCombination, QLineF, QPointF, QRect, Qt, QRectF, pyqtBoundSignal, pyqtSignal, QEvent, QSize
-from PyQt6.QtSvgWidgets import QGraphicsSvgItem, QSvgWidget
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QDialog, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel, QLineEdit,
                              QMessageBox, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                              QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem, QGraphicsRectItem, QComboBox, QFormLayout, QStackedWidget)
 from ..drawing.drawing_controller import DrawingController
-from ..graphics import DeepCopyableSvgItem, StoringQSvgRenderer, DeepCopyableTextbox, SelectableRectItem, DeepCopyableItemGroup
+from ..graphics import DeepCopyableSvgItem, StoringQSvgRenderer, DeepCopyableTextbox, SelectableRectItem
 from collections import deque
 import logging
 from pathlib import Path
@@ -699,8 +698,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._filepath: None | str = None
         self.user_dir: str | None = None
-#        self.scene_width: int = int(1052 * 0.75)
-#        self.scene_height: int = int(744 * 0.75)
         self.scene_width = height
         self.scene_height = width
         self.initUi()
@@ -771,10 +768,12 @@ class MainWindow(QMainWindow):
 
         if not valid_int:
             error_msg += f"\nDimensions must be valid integers\nInput height: {height}, width: {width} "
+            abort = True
         else:
             height, width = int(height), int(width)
             if not (0 < height < 1200) or not (0 < width < 1200): # 1200 arbitrarly chosen, TODO: pick better upper bound
                 error_msg += f"\nInvalid dimensions, valid dimensions are (0, 0) < (height, width) < (1200, 1200)\nInput: {height} {width}"
+                abort = True
         if not dir.is_dir():
             error_msg += f"Invalid directory: {str(dir)}"
 
@@ -791,25 +790,22 @@ class MainWindow(QMainWindow):
 
         if len(error_msg) != 0:
             self.error_dialoge(error_msg)
+
         if not abort:
-            self._build_scene()
+            print("Ye")
+            self.filepath = UNSAVED_NAME
             self.scene_height = height
             self.scene_width = width
-            self._scene.setSceneRect(QRectF(0, 0, height, width))
+            self._build_scene()
+
 
     def _create_widgets(self):
         self.graphics_view = GraphicsView()
-#        self.top_Ruler = RulerWidget("horizontal")
-#        self.side_Ruler = RulerWidget("vertical")
-#        self.top_Ruler.setParent(self.graphics_view.viewport())
-#        self.side_Ruler.setParent(self.graphics_view.viewport())
         self._scene = TexGraphicsScene()
         self.toggle_menu = ToggleMenuWidget()
         self.tool_bar = VToolBar()
         scroll_widget = QWidget()
         scroll_layout = QHBoxLayout(scroll_widget)
-#        scroll_layout.addWidget(self.side_Ruler)
-#        scroll_layout.addWidget(self.top_Ruler)
         scroll_layout.addWidget(self.graphics_view)
         self.scroll_area = ZoomableScrollArea(scroll_widget)
         self.scroll_area.setWidget(scroll_widget)
@@ -818,9 +814,14 @@ class MainWindow(QMainWindow):
         self._scene = TexGraphicsScene()
         self._scene.setBackgroundBrush(QBrush(Qt.GlobalColor.white))
         self.graphics_view.setScene(self._scene)
-        self.graphics_view.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.IgnoreAspectRatio)
         self._scene.setSceneRect(QRectF(0, 0, self.scene_width, self.scene_height)) # TODO
-
+        self.graphics_view.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self._scene.update()
+        self.graphics_view.update()
+        print(self.graphics_view.sceneRect().width(), self.graphics_view.sceneRect().height())
+        self._scene.setBackgroundBrush(QBrush(Qt.GlobalColor.black))
+        self.graphics_view.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.graphics_view.viewport().update()
 
     def switch_widgets(self):
         self.stacked_widget.setCurrentIndex((self.stacked_widget.currentIndex() + 1) % 2)

@@ -1,7 +1,13 @@
-# Vector Graphics Editor
-![veditor](assets/veditor.png)
-A minimalistic vector graphics editor designed for creating svg images containing LaTex.
+# ⚠️  ** Under Development ** ⚠️
+# Scalable Vector Graphics Editor
 
+![veditor](assets/veditor.png)
+A minimalistic vector graphics editor designed for creating svg images with LaTeX support.
+
+
+## Usage
+Flags include
+- '-f  --file': select an svg file to edit
 
 ## Tools
 * `Selector`: Used for selecting graphics items
@@ -26,9 +32,14 @@ and color.
 * `shift-v`: paste item
 * `shift-c`: copy item
 
-# Configuration
-In order to start the editor you must run `python -m main_gui.py`. Flags include
-- '-f  --file': select an svg file to edit
+
+## Dependencies
+In order to export the svg file to pdf we use the Inkscape command line interface. 
+
+## Configuration
+In order to start the editor you must run `python -m cli.py`. 
+
+
 
 For convenience there is a `vector_graphics.sh` file that will run the project. By
 adding 
