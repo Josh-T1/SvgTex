@@ -1,7 +1,7 @@
 # ⚠️  ** Under Development ** ⚠️
 # Scalable Vector Graphics Editor
 
-![veditor](assets/veditor.png)
+![veditor](assets/SvgTex.png)
 A minimalistic vector graphics editor designed for creating svg images with LaTeX support.
 
 
