@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+
 from PyQt6.QtGui import QTransform
 from PyQt6.QtCore import QLineF, QPointF, QRectF
 from PyQt6.QtWidgets import (QGraphicsSceneMouseEvent, QGraphicsItem)

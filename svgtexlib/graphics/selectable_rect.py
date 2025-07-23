@@ -1,13 +1,16 @@
 from __future__ import annotations
 from typing import OrderedDict
+from collections import OrderedDict
+from copy import deepcopy
+
 from PyQt6.QtGui import QPen, QPainterPath, QTransform
 from PyQt6.QtCore import QPointF, Qt, pyqtBoundSignal, QRectF
 from PyQt6.QtWidgets import QGraphicsItem
+
+from .wrappers import DeepCopyableItemABC, DeepCopyableTextbox
 from ..drawing.transformation_handlers import RotationHandler, TransformationHandler, ScaleHandler
 from ..utils import Handlers, Tools
-from .wrappers import DeepCopyableItemABC, DeepCopyableTextbox
-from collections import OrderedDict
-from copy import deepcopy
+
 
 
 

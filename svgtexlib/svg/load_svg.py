@@ -1,12 +1,14 @@
+import re
+
+from pathlib import Path
+from lxml import etree
 from PyQt6.QtGui import QFont, QTransform
 from PyQt6.QtCore import QLineF, QByteArray, QPointF, QRectF
-from lxml import etree
-import re
-from ..graphics import (DeepCopyableEllipseItem, DeepCopyableSvgItem, StoringQSvgRenderer,
-                        DeepCopyablePathItem,DeepCopyableRectItem, DeepCopyableLineItem, DeepCopyableTextbox)
-from pathlib import Path
+
 from ..utils import build_transform
 from .attrib import parse_d_attribute, tools_from_attrib
+from ..graphics import (DeepCopyableEllipseItem, DeepCopyableSvgItem, StoringQSvgRenderer,
+                        DeepCopyablePathItem,DeepCopyableRectItem, DeepCopyableLineItem, DeepCopyableTextbox)
 
 class SvgBuilder:
     """ Class for building a scene with selectable items from svg document

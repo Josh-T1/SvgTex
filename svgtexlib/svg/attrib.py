@@ -1,8 +1,9 @@
 from typing import Dict, Literal, Any
+import re
+
 from PyQt6.QtGui import QColor, QPainterPath, QPen, QBrush
 from PyQt6.QtCore import Qt
 from lxml import etree
-import re
 
 """
 Current approach for setting svg item tools

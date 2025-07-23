@@ -4,12 +4,13 @@ import importlib.util
 import sys
 import json
 from pathlib import Path
-import matplotlib.pyplot as plt
-import io
-import numpy as np
-from lxml import etree
 import re
+import io
+
+import numpy as np
 from PyQt6.QtGui import QTransform
+import matplotlib.pyplot as plt
+from lxml import etree
 
 class Handlers(Enum):
     Selector = "NullDrawingHandler"

@@ -1,11 +1,13 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from typing import Protocol
+
 from PyQt6.QtGui import QBrush, QMouseEvent, QPen, QPainterPath
 from PyQt6.QtCore import QPointF, Qt, pyqtBoundSignal, QRectF, QLineF
 from PyQt6.QtWidgets import (QGraphicsItem, QGraphicsPathItem, QGraphicsView, QGraphicsScene, QGraphicsRectItem)
+
 from ..graphics import (DeepCopyableEllipseItem, DeepCopyableLineItem, DeepCopyablePathItem, DeepCopyableRectItem, SelectableRectItem, DeepCopyableTextbox,
                         DeepCopyableArrowItem, DeepCopyableLineABC)
-from typing import Protocol
 
 TOLERENCE = 10 # GraphicsItems with width or height less than tolerence will be discarded from scene. Assumed to be 'miss click' items
 

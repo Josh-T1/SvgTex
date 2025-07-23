@@ -2,18 +2,21 @@ from collections.abc import Callable
 import subprocess
 from copy import deepcopy
 from typing import Literal, Optional
+from collections import deque
+import logging
+from pathlib import Path
+
 from PyQt6.QtGui import QAction, QBrush, QCloseEvent, QColor, QCursor, QIcon, QKeyEvent, QKeySequence, QMouseEvent, QPaintEvent, QPainterPath, QPen, QPainter, QPixmap, QTransform
 from PyQt6.QtCore import QByteArray, QKeyCombination, QLineF, QPointF, QRect, Qt, QRectF, pyqtBoundSignal, pyqtSignal, QEvent, QSize
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QDialog, QFileDialog, QGestureEvent, QGraphicsItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QLabel, QLineEdit,
                              QMessageBox, QPushButton, QScrollArea, QSizePolicy, QToolBar, QWidget, QHBoxLayout, QVBoxLayout, QGraphicsView,
                              QGraphicsScene, QGraphicsLineItem, QMainWindow, QGraphicsTextItem, QGraphicsRectItem, QComboBox, QFormLayout, QStackedWidget)
+
 from ..drawing.drawing_controller import DrawingController
 from ..graphics import DeepCopyableSvgItem, StoringQSvgRenderer, DeepCopyableTextbox, SelectableRectItem
-from collections import deque
-import logging
-from pathlib import Path
 from ..svg import scene_to_svg, SvgBuilder
 from ..utils import tex2svg, text_is_latex, Handlers, Tools
+
 logger = logging.getLogger(__name__)
 
 

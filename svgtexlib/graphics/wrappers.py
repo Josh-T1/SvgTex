@@ -1,17 +1,20 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import overload
+from abc import ABC, abstractmethod
+import re
+
 from PyQt6.QtGui import QBrush, QColor, QMouseEvent, QPainter, QPainterPath, QPen, QKeyEvent, QTextCursor, QTransform
 from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, QLineF, QPointF, QSize, Qt, QRectF
 from PyQt6.QtSvg import QSvgGenerator, QSvgRenderer
 from PyQt6.QtSvgWidgets import QGraphicsSvgItem
 from PyQt6.QtWidgets import (QGraphicsEllipseItem, QGraphicsItemGroup, QGraphicsLineItem, QGraphicsPathItem, QGraphicsSceneMouseEvent, QGraphicsTextItem,QGraphicsItem, QGraphicsRectItem)
-from ..utils import KeyCodes
-from abc import ABC, abstractmethod
-import re
-from ..utils import transform_path
+
 from .patterns import (build_dense_pattern_svg, color_to_rgb, build_hor_pattern_svg, build_ver_pattern_svg,
                             build_cross_pattern_svg, build_bdiag_pattern_svg, build_fdiag_pattern_svg, build_diagcross_pattern_svg)
+from ..utils import KeyCodes
+
+
+
 
 class DeepCopyableItemABC(QGraphicsItem):
     """ Wrapper for QGraphicsItem that supports deepcopy """
